@@ -56,11 +56,15 @@ O bien: **Code → Download ZIP**, descomprime donde prefieras y ejecuta el
 BSTools/
 ├── LICENSE            CC0 1.0
 ├── README.md          este archivo
+├── CLAUDE.md          convenciones de desarrollo
+├── STATUS.md          estado actual del proyecto
+├── CHANGELOG.md       histórico de cambios
 └── PDF2MD/            una carpeta autocontenida por herramienta
     ├── install.ps1
     ├── uninstall.ps1
     ├── convert.cmd
     ├── pdf2md.py
+    ├── requirements.txt
     └── README.md
 ```
 
