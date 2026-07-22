@@ -8,6 +8,27 @@ herramienta** (cada carpeta lleva su propia versión).
 
 ---
 
+## [BSTools] - 2026-07-22
+
+### Añadido
+
+- `SPEC.md`: especificación de una herramienta, con plantillas copiables de
+  `install.ps1`, `uninstall.ps1` y el lanzador `.cmd`, los tres patrones de
+  arranque (menú contextual, tarea programada, interfaz web local), el contrato
+  con el registro de Windows, cómo probar y la lista de comprobación previa a
+  publicar. Objetivo: no tener que abrir otra herramienta para copiar su
+  estructura al desarrollar una nueva.
+
+### Cambiado
+
+- `CLAUDE.md` adelgaza: la anatomía, las convenciones y el procedimiento de
+  prueba viven ahora en `SPEC.md`; queda lo imprescindible y los enlaces.
+- Nombre del lanzador unificado en `<NombreHerramienta>.cmd` para las
+  herramientas nuevas. `PDF2MD/convert.cmd` conserva su nombre: renombrarlo
+  rompería los registros ya instalados.
+
+---
+
 ## [BrandAssets 1.0.0] - 2026-07-22
 
 Primera versión. Genera el juego completo de iconos e imágenes de marca de una

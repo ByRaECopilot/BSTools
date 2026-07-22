@@ -3,6 +3,7 @@
 Estado actual del proyecto. Se actualiza al final de cada sesión de trabajo.
 Para el histórico de cambios, ver [CHANGELOG.md](CHANGELOG.md).
 Para las convenciones de desarrollo, ver [CLAUDE.md](CLAUDE.md).
+Para construir una herramienta nueva, ver [SPEC.md](SPEC.md).
 
 **Última actualización:** 2026-07-22
 

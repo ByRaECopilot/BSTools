@@ -59,6 +59,7 @@ BSTools/
 ├── LICENSE            CC0 1.0
 ├── README.md          este archivo
 ├── CLAUDE.md          convenciones de desarrollo
+├── SPEC.md            cómo se construye una herramienta (plantillas incluidas)
 ├── STATUS.md          estado actual del proyecto
 ├── CHANGELOG.md       histórico de cambios
 ├── PDF2MD/            una carpeta autocontenida por herramienta
@@ -90,3 +91,7 @@ Cada herramienta es independiente: puedes copiar solo su carpeta y funcionará.
 
 Las *pull requests* son bienvenidas. Al enviar código aceptas liberarlo también
 bajo CC0.
+
+Si vas a añadir una herramienta, [SPEC.md](SPEC.md) tiene la especificación
+completa y las plantillas de `install.ps1`, `uninstall.ps1` y el lanzador listas
+para copiar.
