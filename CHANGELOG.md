@@ -8,6 +8,26 @@ herramienta** (cada carpeta lleva su propia versión).
 
 ---
 
+## [Limpiar Temporales 1.1.0] - 2026-07-22
+
+### Añadido
+
+- `install.ps1` / `uninstall.ps1`: crean y eliminan un acceso directo en el Menú
+  Inicio del usuario (`%APPDATA%`, sin permisos de administrador). Con `-Desktop`
+  se crea también en el Escritorio. Icono de papelera.
+- Autoelevación en el `.bat`: se relanza pidiendo administrador una sola vez para
+  vaciar también el Temp del sistema; si el usuario cancela, limpia solo el suyo.
+- Confirmación `¿Continuar? (S/N)` antes de borrar, para evitar vaciados
+  accidentales al abrirlo desde el Menú Inicio.
+- Resumen en pantalla que indica si se limpió el Temp del sistema o no.
+
+### Cambiado
+
+- `timeout` sustituido por `ping` en la ruta de cancelación para no fallar si la
+  entrada está redirigida.
+
+---
+
 ## [Limpiar Temporales 1.0.0] - 2026-07-22
 
 Primera versión. Herramienta aportada por el usuario, adaptada a las
