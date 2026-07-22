@@ -4,7 +4,7 @@ Estado actual del proyecto. Se actualiza al final de cada sesión de trabajo.
 Para el histórico de cambios, ver [CHANGELOG.md](CHANGELOG.md).
 Para las convenciones de desarrollo, ver [CLAUDE.md](CLAUDE.md).
 
-**Última actualización:** 2026-07-20
+**Última actualización:** 2026-07-22
 
 ---
 
@@ -13,6 +13,7 @@ Para las convenciones de desarrollo, ver [CLAUDE.md](CLAUDE.md).
 | Herramienta | Versión | Estado | Notas |
 |---|---|---|---|
 | [PDF2MD](PDF2MD/) | 1.0.0 | Estable | Probado de punta a punta. En uso. |
+| [Limpiar Temporales](Limpiar%20Temporales/) | 1.0.0 | Estable | Utilidad de doble clic, sin menú contextual. Aportada por el usuario. |
 
 ---
 
@@ -34,6 +35,18 @@ pendiente de que aparezca la necesidad real.
 como motor pese a dar mejor resultado en PDFs complejos, porque descarga unos
 2 GB de modelos y es lento sin GPU. `pymupdf4llm` convierte en segundos y no
 descarga nada.
+
+---
+
+## Limpiar Temporales
+
+Utilidad de doble clic (`.bat`) que vacía `%TEMP%` y `%SystemRoot%\Temp`.
+
+**Nota de diseño:** es la primera herramienta de BSTools que **no** se integra en
+el menú contextual — se ejecuta a mano, así que no lleva `install.ps1` ni toca el
+registro. El Temp del sistema requiere administrador; sin permisos, esa parte se
+omite sin error y solo limpia el del usuario. Los archivos en uso quedan
+bloqueados por Windows y se saltan (comportamiento normal).
 
 ---
 

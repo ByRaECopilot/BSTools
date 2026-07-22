@@ -8,6 +8,31 @@ herramienta** (cada carpeta lleva su propia versión).
 
 ---
 
+## [Limpiar Temporales 1.0.0] - 2026-07-22
+
+Primera versión. Herramienta aportada por el usuario, adaptada a las
+convenciones del repositorio.
+
+### Añadido
+
+- `LimpiarTemporales.bat`: vacía el Temp del usuario (`%TEMP%`) y el del sistema
+  (`%SystemRoot%\Temp`) con un doble clic.
+- `README.md` de la herramienta.
+
+### Cambiado
+
+- El script muestra ahora qué carpetas limpia y un resumen final con `pause`, en
+  vez de cerrar la ventana sin feedback (`exit` → `exit /b`).
+- Avisa de que el Temp del sistema requiere administrador y de que los archivos
+  en uso se omiten, para no confundir la omisión con un fallo.
+
+### Notas
+
+- Es la primera herramienta que **no** usa menú contextual: es una utilidad de
+  ejecución manual, sin instalador ni cambios en el registro.
+
+---
+
 ## [PDF2MD 1.0.0] - 2026-07-20
 
 Primera versión publicada. Reescritura completa de un prototipo previo que

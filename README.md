@@ -15,6 +15,7 @@ pedir permiso ni dar atribución.
 | Herramienta | Qué hace |
 |---|---|
 | [PDF2MD](PDF2MD/) | Convierte un PDF a Markdown limpio y optimizado para que lo entienda un LLM (Claude, ChatGPT...). Click derecho → *Convertir a Markdown*. |
+| [Limpiar Temporales](Limpiar%20Temporales/) | Vacía las carpetas temporales de Windows con un doble clic. Útil cuando se acumulan miles de archivos temporales. |
 
 *(Se irán añadiendo más.)*
 
@@ -59,12 +60,15 @@ BSTools/
 ├── CLAUDE.md          convenciones de desarrollo
 ├── STATUS.md          estado actual del proyecto
 ├── CHANGELOG.md       histórico de cambios
-└── PDF2MD/            una carpeta autocontenida por herramienta
-    ├── install.ps1
-    ├── uninstall.ps1
-    ├── convert.cmd
-    ├── pdf2md.py
-    ├── requirements.txt
+├── PDF2MD/            una carpeta autocontenida por herramienta
+│   ├── install.ps1
+│   ├── uninstall.ps1
+│   ├── convert.cmd
+│   ├── pdf2md.py
+│   ├── requirements.txt
+│   └── README.md
+└── Limpiar Temporales/
+    ├── LimpiarTemporales.bat
     └── README.md
 ```
 
