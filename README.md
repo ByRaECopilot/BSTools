@@ -16,6 +16,7 @@ pedir permiso ni dar atribución.
 |---|---|
 | [PDF2MD](PDF2MD/) | Convierte un PDF a Markdown limpio y optimizado para que lo entienda un LLM (Claude, ChatGPT...). Click derecho → *Convertir a Markdown*. |
 | [Limpiar Temporales](Limpiar%20Temporales/) | Vacía las carpetas temporales de Windows automáticamente al iniciar sesión, en silencio. Útil cuando se acumulan miles de archivos temporales. |
+| [BrandAssets](BrandAssets/) | De un PNG de 1024×1024 saca todos los iconos e imágenes de una PWA (favicons, *maskable*, `apple-touch-icon`, `og-image.jpg` y el `manifest.webmanifest`). Interfaz web local, previsualización antes de exportar. |
 
 *(Se irán añadiendo más.)*
 
@@ -67,10 +68,19 @@ BSTools/
 │   ├── pdf2md.py
 │   ├── requirements.txt
 │   └── README.md
-└── Limpiar Temporales/
+├── Limpiar Temporales/
+│   ├── install.ps1
+│   ├── uninstall.ps1
+│   ├── LimpiarTemporales.bat
+│   └── README.md
+└── BrandAssets/
     ├── install.ps1
     ├── uninstall.ps1
-    ├── LimpiarTemporales.bat
+    ├── BrandAssets.cmd
+    ├── server.py
+    ├── assets.py
+    ├── ui.html
+    ├── requirements.txt
     └── README.md
 ```
 

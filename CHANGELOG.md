@@ -8,6 +8,42 @@ herramienta** (cada carpeta lleva su propia versión).
 
 ---
 
+## [BrandAssets 1.0.0] - 2026-07-22
+
+Primera versión. Genera el juego completo de iconos e imágenes de marca de una
+PWA a partir de un PNG de 1024×1024 con transparencia.
+
+### Añadido
+
+- `server.py`: servidor local con la biblioteca estándar. Escucha solo en
+  `127.0.0.1`, en un puerto libre elegido al arrancar, y exige un token
+  aleatorio en cada petición para que ningún otro proceso local pueda pedirle
+  que escriba archivos.
+- `assets.py`: la generación, sin nada de HTTP. Devuelve los 17 archivos en
+  memoria para poder previsualizarlos antes de tocar el disco.
+- `ui.html`: interfaz web (arrastrar y soltar, opciones, previsualización con
+  tamaños reales, carpeta destino + nombre de subcarpeta, exportar).
+- 17 archivos de salida: `logo.png`, `favicon.ico` multi-resolución,
+  `favicon-16/32/48`, `icon-96/128/192/256/384/512`, `maskable-192/512`,
+  `apple-touch-icon.png`, `og-image.jpg`, `manifest.webmanifest` y
+  `snippet.html` con las etiquetas del `<head>`.
+- Optimización: PNG sin metadatos, paleta de 256 colores cuando es **sin
+  pérdida**, JPEG progresivo de calidad 82 y casilla opcional de compresión
+  agresiva (solo se acepta si ahorra más de un 15%).
+- `install.ps1` / `uninstall.ps1`: instalan Pillow, crean un acceso directo con
+  icono dentro de la propia carpeta de la herramienta y registran la opción
+  *Generar assets de marca* en el menú contextual de los `.png`.
+
+### Notas
+
+- Tercer patrón de arranque del repositorio: doble clic que levanta una
+  **interfaz web local**, junto al menú contextual (PDF2MD) y la tarea de
+  arranque (Limpiar Temporales).
+- No genera `favicon.svg` (no se puede reconstruir un vectorial desde un PNG) ni
+  las capturas del manifest (son de la app real, no del logo).
+
+---
+
 ## [Limpiar Temporales 2.0.0] - 2026-07-22
 
 Cambio de enfoque: de lanzarse a mano a **ejecutarse solo al iniciar Windows**,

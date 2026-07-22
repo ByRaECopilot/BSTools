@@ -14,6 +14,7 @@ Para las convenciones de desarrollo, ver [CLAUDE.md](CLAUDE.md).
 |---|---|---|---|
 | [PDF2MD](PDF2MD/) | 1.0.0 | Estable | Probado de punta a punta. En uso. |
 | [Limpiar Temporales](Limpiar%20Temporales/) | 2.0.0 | Estable | Tarea de arranque silenciosa, sin confirmación. Probado. |
+| [BrandAssets](BrandAssets/) | 1.0.0 | Estable | Iconos de PWA desde un PNG 1024. Probado de punta a punta. |
 
 ---
 
@@ -64,6 +65,45 @@ se ejecutó la tarea en real para no borrar el scratchpad de la sesión.
 
 ---
 
+## BrandAssets
+
+De un PNG 1024×1024 con transparencia a los 17 archivos que necesita una PWA.
+Motor: Pillow. Interfaz: página web servida en `127.0.0.1` desde la biblioteca
+estándar de Python.
+
+**Funciona:** carga por arrastre o desde el menú contextual de un `.png`
+(con la carpeta de esa imagen como destino por defecto), previsualización con
+tamaños reales, exportación a la subcarpeta indicada, `manifest.webmanifest` y
+`snippet.html` generados con los datos del formulario.
+
+**Seguridad:** el servidor escribe archivos, así que exige un token aleatorio
+generado al arrancar (va en la URL que se abre) y escucha solo en loopback. Sin
+token responde `403`. El nombre de la subcarpeta se sanea: no puede contener
+rutas ni escaparse de la carpeta destino.
+
+**Decisiones de diseño:**
+
+- Los assets se generan **en memoria** y solo se escriben al pulsar *Exportar*.
+  Así la previsualización muestra los bytes reales, no una estimación.
+- El *maskable* dibuja el logo al 80% central sobre fondo opaco (zona segura de
+  Android); `apple-touch-icon` lleva fondo opaco porque iOS pinta de negro la
+  transparencia; `og-image` es JPG 1200×630 porque es lo que esperan los
+  agregadores.
+- La reducción a paleta de 256 colores se aplica sola **solo cuando es sin
+  pérdida** (el caso habitual de un logo plano). La versión con pérdida está
+  detrás de una casilla y solo se acepta si ahorra más de un 15%.
+
+**No genera:** `favicon.svg` (no se reconstruye un vectorial desde un PNG) ni
+las capturas del manifest (son capturas de la app real).
+
+**Probado:** generación contra un PNG sintético de 1024 (17 archivos, ~150 KB),
+servidor de punta a punta (token válido e inválido, `/generate`, `/export`,
+`/quit`), exportación a rutas con espacios, intento de travesía de directorios
+(`../../`) contenido dentro del destino, flujo completo en el navegador y
+lanzador `.cmd` desde una carpeta con espacios.
+
+---
+
 ## Pendiente / ideas
 
 Nada bloqueante. Ideas para más adelante, sin compromiso:
@@ -71,6 +111,8 @@ Nada bloqueante. Ideas para más adelante, sin compromiso:
 - OCR en PDF2MD para escaneados (solo si surge la necesidad).
 - Descripción y *topics* del repositorio en GitHub, para que se encuentre.
 - Herramientas nuevas: aún sin decidir.
+- BrandAssets: generar `favicon.svg` cuando la entrada ya sea un SVG, y
+  plantillas de captura para el `screenshots` del manifest.
 
 ---
 

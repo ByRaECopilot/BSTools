@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>BrandAssets - BSTools</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --line: #262b36;
+    --text: #e7e9ee;
+    --muted: #99a1b3;
+    --accent: #6ea8fe;
+    --ok: #4ade80;
+    --err: #f87171;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f7f9; --panel: #ffffff; --line: #e2e5ea;
+      --text: #1a1d23; --muted: #6b7280; --accent: #2563eb;
+      --ok: #16a34a; --err: #dc2626;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px;
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 14px; color: var(--muted); font-weight: 600;
+       text-transform: uppercase; letter-spacing: .06em; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+  section {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px; margin-bottom: 18px;
+  }
+  section[hidden] { display: none; }
+
+  #drop {
+    border: 2px dashed var(--line); border-radius: 10px;
+    padding: 34px; text-align: center; cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  #drop:hover, #drop.over { border-color: var(--accent); background: rgba(110,168,254,.07); }
+  #drop p { margin: 6px 0; color: var(--muted); }
+  #drop strong { color: var(--text); }
+
+  .loaded { display: flex; align-items: center; gap: 18px; }
+  .loaded img {
+    width: 96px; height: 96px; object-fit: contain; border-radius: 8px;
+    background: repeating-conic-gradient(#8884 0 25%, transparent 0 50%) 0 0/16px 16px;
+  }
+  .loaded div { min-width: 0; }
+  .loaded .name { font-weight: 600; word-break: break-all; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+  input[type=text], input[type=color] {
+    width: 100%; padding: 9px 11px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text);
+    font: inherit; font-size: 14px;
+  }
+  input[type=color] { padding: 3px; height: 38px; cursor: pointer; }
+  .check { display: flex; align-items: center; gap: 9px; margin-top: 16px; color: var(--muted); font-size: 14px; }
+
+  button {
+    font: inherit; font-weight: 600; padding: 11px 20px; border-radius: 9px;
+    border: 1px solid transparent; cursor: pointer;
+    background: var(--accent); color: #fff;
+  }
+  button.ghost { background: transparent; border-color: var(--line); color: var(--text); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-top: 18px; }
+  .row .field { flex: 1 1 220px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; text-align: center; }
+  .card .thumb {
+    height: 96px; display: flex; align-items: center; justify-content: center;
+    margin-bottom: 10px; border-radius: 6px;
+    background: repeating-conic-gradient(#8884 0 25%, transparent 0 50%) 0 0/14px 14px;
+  }
+  .card .thumb img { max-width: 100%; max-height: 96px; image-rendering: auto; }
+  .card .thumb.text { font-size: 28px; background: none; color: var(--muted); }
+  .card .fname { font-size: 13px; font-weight: 600; word-break: break-all; }
+  .card .meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .card .note { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.35; }
+
+  .msg { margin-top: 14px; font-size: 14px; }
+  .msg.ok { color: var(--ok); }
+  .msg.err { color: var(--err); }
+  .total { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 28px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>BrandAssets</h1>
+  <p class="sub">Un PNG de 1024x1024 con transparencia dentro, todos los iconos de tu PWA fuera.
+     Nada sale de este equipo.</p>
+
+  <!-- 1. Imagen -->
+  <section>
+    <h2>1 · Imagen de origen</h2>
+    <div id="drop">
+      <p><strong>Arrastra aqui tu PNG</strong> o haz click para elegirlo</p>
+      <p>Ideal: 1024x1024, cuadrado, con fondo transparente</p>
+    </div>
+    <div id="loaded" class="loaded" hidden>
+      <img id="preview" alt="">
+      <div>
+        <div class="name" id="srcName"></div>
+        <div class="meta" id="srcMeta" style="color:var(--muted);font-size:13px"></div>
+        <button class="ghost" id="change" style="margin-top:10px;padding:7px 14px">Cambiar</button>
+      </div>
+    </div>
+    <input type="file" id="file" accept="image/png,image/*" hidden>
+    <div class="msg err" id="srcWarn" hidden></div>
+  </section>
+
+  <!-- 2. Opciones -->
+  <section>
+    <h2>2 · Datos de la aplicacion</h2>
+    <div class="grid">
+      <div><label for="app_name">Nombre de la aplicacion</label>
+        <input type="text" id="app_name" value="Mi aplicacion"></div>
+      <div><label for="short_name">Nombre corto</label>
+        <input type="text" id="short_name" value="MiApp"></div>
+      <div><label for="start_url">start_url</label>
+        <input type="text" id="start_url" value="/"></div>
+      <div><label for="icon_path">Ruta de los iconos en la web</label>
+        <input type="text" id="icon_path" value="/icons"></div>
+      <div><label for="background">Color de fondo (maskable, iOS, og-image)</label>
+        <input type="color" id="background" value="#ffffff"></div>
+      <div><label for="theme">Color de tema (barra del navegador)</label>
+        <input type="color" id="theme" value="#111111"></div>
+    </div>
+    <label class="check"><input type="checkbox" id="aggressive">
+      Compresion agresiva (paleta de 256 colores; mas ligero, puede degradar degradados)</label>
+    <div class="row">
+      <button id="generate" disabled>Generar y previsualizar</button>
+    </div>
+  </section>
+
+  <!-- 3. Previsualizacion -->
+  <section id="resultSection" hidden>
+    <h2>3 · Previsualizacion</h2>
+    <p class="total" id="total"></p>
+    <div class="cards" id="cards"></div>
+  </section>
+
+  <!-- 4. Exportar -->
+  <section id="exportSection" hidden>
+    <h2>4 · Exportar</h2>
+    <div class="row">
+      <div class="field">
+        <label for="folder">Carpeta destino</label>
+        <input type="text" id="folder">
+      </div>
+      <div class="field">
+        <label for="subfolder">Nombre de la subcarpeta</label>
+        <input type="text" id="subfolder" placeholder="brand">
+      </div>
+      <button id="export">Exportar</button>
+    </div>
+    <div class="msg" id="exportMsg" hidden></div>
+  </section>
+
+  <footer>
+    BSTools · <a href="https://www.byraesoftware.com" target="_blank" rel="noopener">byraesoftware.com</a>
+    · CC0 1.0 · <a href="#" id="quit">cerrar servidor</a>
+  </footer>
+</main>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+const $ = id => document.getElementById(id);
+let sourceB64 = null;
+
+function post(path, body) {
+  return fetch(path, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Token': TOKEN},
+    body: JSON.stringify(body)
+  }).then(async r => {
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error desconocido');
+    return data;
+  });
+}
+
+function human(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(2) + ' MB';
+}
+
+// --- carga de la imagen -------------------------------------------------------
+function loadFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;
+    sourceB64 = dataUrl.split(',')[1];
+    $('preview').src = dataUrl;
+    $('srcName').textContent = file.name;
+    $('drop').hidden = true;
+    $('loaded').hidden = false;
+    $('generate').disabled = false;
+
+    const probe = new Image();
+    probe.onload = () => {
+      $('srcMeta').textContent = probe.width + 'x' + probe.height + ' · ' + human(file.size);
+      const warn = [];
+      if (probe.width !== probe.height) warn.push('La imagen no es cuadrada: se rellenara con transparencia.');
+      else if (probe.width < 512) warn.push('Menos de 512 px: los iconos grandes saldran borrosos.');
+      if (!/png/i.test(file.type)) warn.push('No es un PNG: si no tiene transparencia, los iconos llevaran fondo solido.');
+      $('srcWarn').hidden = warn.length === 0;
+      $('srcWarn').textContent = warn.join(' ');
+    };
+    probe.src = dataUrl;
+  };
+  reader.readAsDataURL(file);
+}
+
+$('drop').onclick = () => $('file').click();
+$('change').onclick = () => $('file').click();
+$('file').onchange = e => loadFile(e.target.files[0]);
+['dragenter', 'dragover'].forEach(ev => $('drop').addEventListener(ev, e => {
+  e.preventDefault(); $('drop').classList.add('over');
+}));
+['dragleave', 'drop'].forEach(ev => $('drop').addEventListener(ev, e => {
+  e.preventDefault(); $('drop').classList.remove('over');
+}));
+$('drop').addEventListener('drop', e => loadFile(e.dataTransfer.files[0]));
+
+// --- generar ------------------------------------------------------------------
+$('generate').onclick = async () => {
+  const btn = $('generate');
+  btn.disabled = true; btn.textContent = 'Generando...';
+  try {
+    const data = await post('/generate', {
+      image: sourceB64,
+      app_name: $('app_name').value,
+      short_name: $('short_name').value,
+      start_url: $('start_url').value,
+      icon_path: $('icon_path').value,
+      background: $('background').value,
+      theme: $('theme').value,
+      aggressive: $('aggressive').checked
+    });
+    render(data.assets);
+  } catch (err) {
+    alert('No se pudo generar: ' + err.message);
+  }
+  btn.disabled = false; btn.textContent = 'Generar y previsualizar';
+};
+
+function render(items) {
+  const cards = $('cards');
+  cards.innerHTML = '';
+  let total = 0;
+  for (const a of items) {
+    total += a.bytes;
+    const card = document.createElement('div');
+    card.className = 'card';
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    if (a.mime.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.src = 'data:' + a.mime + ';base64,' + a.data;
+      img.alt = a.name;
+      thumb.appendChild(img);
+    } else {
+      thumb.classList.add('text');
+      thumb.textContent = '{ }';
+    }
+    const dims = a.width ? a.width + 'x' + a.height + ' · ' : '';
+    card.appendChild(thumb);
+    card.insertAdjacentHTML('beforeend',
+      '<div class="fname"></div><div class="meta"></div><div class="note"></div>');
+    card.querySelector('.fname').textContent = a.name;
+    card.querySelector('.meta').textContent = dims + human(a.bytes);
+    card.querySelector('.note').textContent = a.note;
+    cards.appendChild(card);
+  }
+  $('total').textContent = items.length + ' archivos · ' + human(total) + ' en total';
+  $('resultSection').hidden = false;
+  $('exportSection').hidden = false;
+  $('exportMsg').hidden = true;
+  $('exportSection').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+// --- exportar -----------------------------------------------------------------
+$('export').onclick = async () => {
+  const msg = $('exportMsg');
+  const btn = $('export');
+  btn.disabled = true; btn.textContent = 'Exportando...';
+  try {
+    const data = await post('/export', {
+      folder: $('folder').value,
+      name: $('subfolder').value
+    });
+    msg.className = 'msg ok';
+    msg.textContent = data.count + ' archivos guardados en ' + data.folder;
+    msg.hidden = false;
+  } catch (err) {
+    msg.className = 'msg err';
+    msg.textContent = err.message;
+    msg.hidden = false;
+  }
+  btn.disabled = false; btn.textContent = 'Exportar';
+};
+
+$('quit').onclick = async e => {
+  e.preventDefault();
+  try { await post('/quit', {}); } catch (_) {}
+  document.body.innerHTML =
+    '<main><h1>Servidor detenido</h1><p class="sub">Ya puedes cerrar esta pestana.</p></main>';
+};
+
+// --- precarga (cuando se lanza desde el menu contextual) ----------------------
+fetch('/preload?t=' + TOKEN).then(r => r.json()).then(p => {
+  if (p.folder) $('folder').value = p.folder;
+  if (p.data) {
+    const bytes = Uint8Array.from(atob(p.data), c => c.charCodeAt(0));
+    loadFile(new File([bytes], p.name, {type: 'image/png'}));
+  }
+}).catch(() => {});
+</script>
+</body>
+</html>
