@@ -8,6 +8,39 @@ herramienta** (cada carpeta lleva su propia versión).
 
 ---
 
+## [Limpiar Temporales 2.0.0] - 2026-07-22
+
+Cambio de enfoque: de lanzarse a mano a **ejecutarse solo al iniciar Windows**,
+en silencio y sin preguntar.
+
+### Cambiado
+
+- `install.ps1` ahora registra una **tarea programada** (`BSTools - Limpiar
+  Temporales`) con disparador al iniciar sesión, en vez de crear un acceso
+  directo en el Menú Inicio. La tarea corre **oculta** (sin ventana).
+- El `.bat` **borra directamente, sin confirmación** `S/N`. Nuevo modo `/silent`
+  (sin texto ni pausa) que usa la tarea del arranque.
+
+### Eliminado
+
+- Confirmación previa al borrado.
+- Autoelevación automática del `.bat`: en una tarea de arranque habría provocado
+  un aviso UAC en cada inicio de sesión. El Temp del sistema pasa a cubrirse con
+  el modo `-System` del instalador (tarea con privilegios altos).
+- Acceso directo del Menú Inicio de la versión 1.1.0 (el instalador y el
+  desinstalador lo eliminan si existe).
+
+### Añadido
+
+- `install.ps1 -System`: registra la tarea con privilegios altos para vaciar
+  también el Temp del sistema (requiere administrador en la instalación).
+
+### Notas
+
+- Es la primera herramienta de BSTools que se instala como **tarea de arranque**.
+
+---
+
 ## [Limpiar Temporales 1.1.0] - 2026-07-22
 
 ### Añadido

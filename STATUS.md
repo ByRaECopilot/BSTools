@@ -13,7 +13,7 @@ Para las convenciones de desarrollo, ver [CLAUDE.md](CLAUDE.md).
 | Herramienta | Versión | Estado | Notas |
 |---|---|---|---|
 | [PDF2MD](PDF2MD/) | 1.0.0 | Estable | Probado de punta a punta. En uso. |
-| [Limpiar Temporales](Limpiar%20Temporales/) | 1.1.0 | Estable | Acceso directo en Menú Inicio + autoelevación. Probado. |
+| [Limpiar Temporales](Limpiar%20Temporales/) | 2.0.0 | Estable | Tarea de arranque silenciosa, sin confirmación. Probado. |
 
 ---
 
@@ -42,18 +42,25 @@ descarga nada.
 
 Utilidad de doble clic (`.bat`) que vacía `%TEMP%` y `%SystemRoot%\Temp`.
 
-**Nota de diseño:** no se integra en el menú contextual — se instala como
-**acceso directo en el Menú Inicio** (`install.ps1`, en `%APPDATA%`, sin admin;
-sin tocar el registro). Es el segundo patrón de instalación del repo, junto al
-verbo de menú contextual de PDF2MD.
+**Nota de diseño:** se ejecuta **automáticamente al iniciar sesión**, en silencio
+y sin confirmación. `install.ps1` registra una **tarea programada**
+(`BSTools - Limpiar Temporales`, disparador *AtLogOn*, oculta). Tercer patrón de
+instalación del repo, junto al menú contextual (PDF2MD) y —descartado en esta
+herramienta— el acceso directo de Menú Inicio.
 
-**Autoelevación:** el `.bat` se relanza pidiendo administrador una sola vez, para
-poder vaciar también el Temp del sistema. Si el usuario cancela el UAC, sigue y
-limpia solo el Temp del usuario. Un único acceso directo cubre ambos casos.
-Incluye confirmación `S/N` antes de borrar (evita vaciados por un clic accidental
-desde el Menú Inicio). Los archivos en uso quedan bloqueados por Windows y se
-saltan (comportamiento normal). Probado: ruta de cancelación y limpieza real
-contra un `%TEMP%` de prueba.
+**Silencioso sin ventana:** la tarea lanza `powershell -WindowStyle Hidden` que a
+su vez ejecuta el `.bat /silent` también oculto. Sin flash de consola en el
+arranque.
+
+**Admin:** por defecto la tarea es *Limited* (sin admin) y limpia solo el Temp del
+usuario — que es donde se acumulan los temporales de Claude, el caso real. Para
+incluir el Temp del sistema, `install.ps1 -System` la registra con *Highest*
+(requiere admin una vez en la instalación). Se quitó la autoelevación del `.bat`:
+en una tarea de arranque provocaría un UAC en cada inicio de sesión.
+
+**Probado:** modo `/silent` contra un `%TEMP%` de prueba (borra sin salida) y
+registro de la tarea (disparador, RunLevel Limited, Hidden, acción correcta). No
+se ejecutó la tarea en real para no borrar el scratchpad de la sesión.
 
 ---
 

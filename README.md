@@ -15,7 +15,7 @@ pedir permiso ni dar atribución.
 | Herramienta | Qué hace |
 |---|---|
 | [PDF2MD](PDF2MD/) | Convierte un PDF a Markdown limpio y optimizado para que lo entienda un LLM (Claude, ChatGPT...). Click derecho → *Convertir a Markdown*. |
-| [Limpiar Temporales](Limpiar%20Temporales/) | Vacía las carpetas temporales de Windows. Se instala como acceso directo en el Menú Inicio. Útil cuando se acumulan miles de archivos temporales. |
+| [Limpiar Temporales](Limpiar%20Temporales/) | Vacía las carpetas temporales de Windows automáticamente al iniciar sesión, en silencio. Útil cuando se acumulan miles de archivos temporales. |
 
 *(Se irán añadiendo más.)*
 

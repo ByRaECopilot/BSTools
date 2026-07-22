@@ -1,72 +1,90 @@
 <#
 .SYNOPSIS
-    Crea un acceso directo a "Limpiar Temporales" en el Menu Inicio.
+    Registra "Limpiar Temporales" para que se ejecute al iniciar Windows.
 
 .DESCRIPTION
     Parte de BSTools - https://www.byraesoftware.com
     Licencia CC0 1.0 (dominio publico).
 
-    Coloca el acceso directo en el Menu Inicio del usuario actual
-    (%APPDATA%\Microsoft\Windows\Start Menu\Programs\BSTools). NO requiere
-    permisos de administrador. Con -Desktop crea tambien uno en el Escritorio.
+    Crea una tarea programada que, al iniciar sesion el usuario, vacia las
+    carpetas temporales de forma silenciosa (sin ventana ni confirmacion).
+
+    Por defecto limpia solo el Temp del usuario y NO requiere administrador.
+    Con -System registra la tarea con privilegios altos para vaciar tambien
+    el Temp del sistema; en ese caso hay que ejecutar este script como
+    administrador (una sola vez, en la instalacion).
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\install.ps1
-    powershell -ExecutionPolicy Bypass -File .\install.ps1 -Desktop
+    powershell -ExecutionPolicy Bypass -File .\install.ps1 -System
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$Desktop
+    [switch]$System
 )
 
 $ErrorActionPreference = 'Stop'
 
 $toolDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$target   = Join-Path $toolDir 'LimpiarTemporales.bat'
-$linkName = 'Limpiar Temporales.lnk'
-$icon     = "$env:SystemRoot\System32\imageres.dll,-54"  # papelera
+$bat      = Join-Path $toolDir 'LimpiarTemporales.bat'
+$taskName = 'BSTools - Limpiar Temporales'
 
-if (-not (Test-Path $target)) {
+if (-not (Test-Path $bat)) {
     throw "No se encuentra LimpiarTemporales.bat en $toolDir"
 }
 
 Write-Host 'Limpiar Temporales - Instalacion' -ForegroundColor Cyan
 Write-Host "  Carpeta: $toolDir"
 
-function New-Shortcut {
-    param([Parameter(Mandatory)][string]$Path)
-
-    $parent = Split-Path -Parent $Path
-    if (-not (Test-Path $parent)) {
-        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+# --- Limpieza de la version anterior (acceso directo en Menu Inicio) ----------
+$legacyLinks = @(
+    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\BSTools\Limpiar Temporales.lnk'),
+    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Limpiar Temporales.lnk')
+)
+foreach ($link in $legacyLinks) {
+    if (Test-Path $link) {
+        Remove-Item $link -Force
+        Write-Host "  Eliminado acceso directo antiguo: $link" -ForegroundColor DarkGray
     }
-
-    $shell = New-Object -ComObject WScript.Shell
-    $lnk = $shell.CreateShortcut($Path)
-    $lnk.TargetPath       = $target
-    $lnk.WorkingDirectory = $toolDir
-    $lnk.IconLocation     = $icon
-    $lnk.Description       = 'Vacia las carpetas temporales de Windows (BSTools)'
-    $lnk.Save()
-    [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
-    Write-Host "  Creado: $Path" -ForegroundColor Green
+}
+$legacyFolder = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\BSTools'
+if ((Test-Path $legacyFolder) -and -not (Get-ChildItem $legacyFolder -Force)) {
+    Remove-Item $legacyFolder -Force
 }
 
-# --- Menu Inicio (siempre) ----------------------------------------------------
-$startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\BSTools\$linkName"
-New-Shortcut -Path $startMenu
+# --- Tarea programada al iniciar sesion ---------------------------------------
+# Se ejecuta oculta: powershell (sin ventana) lanza el .bat en modo silencioso,
+# tambien oculto. Asi no aparece ninguna ventana en el arranque.
+$inner    = "Start-Process -WindowStyle Hidden -FilePath '$bat' -ArgumentList '/silent'"
+$argument = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$inner`""
 
-# --- Escritorio (opcional) ----------------------------------------------------
-if ($Desktop) {
-    $desktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) $linkName
-    New-Shortcut -Path $desktopLnk
-}
+$action  = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $argument
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -Hidden `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+
+$runLevel = if ($System) { 'Highest' } else { 'Limited' }
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel $runLevel
+
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+    -Settings $settings -Principal $principal -Force | Out-Null
 
 Write-Host ''
 Write-Host 'Instalado correctamente.' -ForegroundColor Green
-Write-Host "  Busca 'Limpiar Temporales' en el Menu Inicio."
+Write-Host "  Tarea: '$taskName'"
+Write-Host '  Se ejecutara, en silencio, cada vez que inicies sesion en Windows.'
+if ($System) {
+    Write-Host '  Modo -System: vaciara tambien el Temp del sistema.' -ForegroundColor Green
+}
+else {
+    Write-Host '  Limpia el Temp del usuario. Para incluir el del sistema, reinstala' -ForegroundColor DarkGray
+    Write-Host '  como administrador con:  install.ps1 -System' -ForegroundColor DarkGray
+}
 Write-Host ''
-Write-Host 'Al abrirlo pedira permisos de administrador para limpiar tambien el' -ForegroundColor DarkGray
-Write-Host 'Temp del sistema; si los rechazas, limpiara solo el Temp del usuario.' -ForegroundColor DarkGray
+Write-Host 'Para probarla ahora sin reiniciar:' -ForegroundColor DarkGray
+Write-Host "  Start-ScheduledTask -TaskName '$taskName'" -ForegroundColor DarkGray
 Write-Host 'Para desinstalar: .\uninstall.ps1' -ForegroundColor DarkGray

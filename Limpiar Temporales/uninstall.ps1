@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Elimina los accesos directos de "Limpiar Temporales".
+    Desregistra la tarea de arranque de "Limpiar Temporales".
 
 .DESCRIPTION
     Parte de BSTools - https://www.byraesoftware.com
@@ -11,32 +11,35 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$linkName = 'Limpiar Temporales.lnk'
+$taskName = 'BSTools - Limpiar Temporales'
 
-$startFolder = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\BSTools'
-$targets = @(
-    (Join-Path $startFolder $linkName),
-    (Join-Path ([Environment]::GetFolderPath('Desktop')) $linkName)
+$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($task) {
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+    Write-Host "  Eliminada la tarea: '$taskName'"
+    $removed = $true
+}
+
+# Limpieza de accesos directos de versiones anteriores, por si quedaron
+$legacyLinks = @(
+    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\BSTools\Limpiar Temporales.lnk'),
+    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Limpiar Temporales.lnk')
 )
-
-$removed = 0
-foreach ($path in $targets) {
-    if (Test-Path $path) {
-        Remove-Item -Path $path -Force
-        Write-Host "  Eliminado: $path"
-        $removed++
+foreach ($link in $legacyLinks) {
+    if (Test-Path $link) {
+        Remove-Item $link -Force
+        Write-Host "  Eliminado acceso directo antiguo: $link"
+        $removed = $true
     }
 }
-
-# Borrar la carpeta BSTools del Menu Inicio si quedo vacia
-if ((Test-Path $startFolder) -and -not (Get-ChildItem $startFolder -Force)) {
-    Remove-Item -Path $startFolder -Force
-    Write-Host "  Eliminada carpeta vacia: $startFolder"
+$legacyFolder = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\BSTools'
+if ((Test-Path $legacyFolder) -and -not (Get-ChildItem $legacyFolder -Force)) {
+    Remove-Item $legacyFolder -Force
 }
 
-if ($removed -eq 0) {
-    Write-Host 'No habia accesos directos que eliminar.' -ForegroundColor Yellow
+if ($removed) {
+    Write-Host 'Limpiar Temporales desinstalado del arranque.' -ForegroundColor Green
 }
 else {
-    Write-Host 'Limpiar Temporales desinstalado del Menu Inicio.' -ForegroundColor Green
+    Write-Host 'No habia nada que desinstalar.' -ForegroundColor Yellow
 }

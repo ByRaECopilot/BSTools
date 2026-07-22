@@ -3,46 +3,27 @@ setlocal
 title Limpiar Temporales - BSTools
 
 rem --------------------------------------------------------------------------
-rem Autoelevacion (una sola vez): intenta obtener permisos de administrador
-rem para poder vaciar tambien el Temp del sistema. Si el usuario cancela el
-rem UAC, la ejecucion continua y limpia solo el Temp del usuario.
+rem  Borra directamente las carpetas temporales de Windows. Sin confirmacion.
+rem
+rem  /silent : sin texto ni pausa. Lo usa la tarea programada del arranque.
+rem
+rem  Vacia siempre el Temp del usuario (%TEMP%). El Temp del sistema
+rem  (%SystemRoot%\Temp) solo se toca si el proceso corre como administrador
+rem  (p. ej. la tarea instalada con -System, o al ejecutar el .bat como admin).
 rem --------------------------------------------------------------------------
-net session >nul 2>&1
-if errorlevel 1 (
-    if not "%~1"=="/elevated" (
-        powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -ArgumentList '/elevated' -Verb RunAs; exit 0 } catch { exit 1 }"
-        if not errorlevel 1 exit /b
-    )
-)
 
-rem --- Saber si finalmente somos administrador (para el mensaje) -------------
+set "SILENT=0"
+if /i "%~1"=="/silent" set "SILENT=1"
+
 set "ES_ADMIN=0"
 net session >nul 2>&1
 if not errorlevel 1 set "ES_ADMIN=1"
 
-echo ==========================================================
-echo   Limpiar Temporales - BSTools
-echo ==========================================================
-echo.
-echo   Se vaciaran las carpetas temporales de Windows:
-echo     - Usuario:  %TEMP%
-if "%ES_ADMIN%"=="1" (
-    echo     - Sistema:  %SystemRoot%\Temp
-) else (
-    echo     - Sistema:  (omitido, sin permisos de administrador^)
+if "%SILENT%"=="0" (
+    echo Limpiando archivos temporales...
+    echo   Usuario:  %TEMP%
+    if "%ES_ADMIN%"=="1" echo   Sistema:  %SystemRoot%\Temp
 )
-echo.
-
-choice /c SN /n /m "  Continuar? (S/N): "
-if errorlevel 2 (
-    echo.
-    echo   Cancelado.
-    ping -n 2 127.0.0.1 >nul
-    exit /b
-)
-
-echo.
-echo   Limpiando...
 
 rem --- Temp del usuario -----------------------------------------------------
 if defined TEMP (
@@ -56,14 +37,11 @@ if "%ES_ADMIN%"=="1" if defined SystemRoot (
     for /d %%i in ("%SystemRoot%\Temp\*") do rmdir /q /s "%%i" >nul 2>&1
 )
 
-echo.
-echo   Listo.
-echo   Los archivos en uso no se pueden borrar y se omiten: es normal.
-if "%ES_ADMIN%"=="0" (
-    echo   El Temp del sistema no se toco: relanza aceptando el aviso de
-    echo   administrador para incluirlo.
+if "%SILENT%"=="0" (
+    echo.
+    echo Listo. Los archivos en uso se omiten: es normal.
+    pause
 )
-echo.
-pause
+
 endlocal
 exit /b
