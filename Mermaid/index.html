@@ -174,14 +174,28 @@
   .right .tabs { display: flex; padding: 12px 14px 0; gap: 8px; }
   .right .actions { display: flex; flex-wrap: wrap; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
   .right .content { flex: 1; min-height: 0; position: relative; }
-  #codeView, #previewView { position: absolute; inset: 0; overflow: auto; }
-  #previewView { display: none; padding: 18px; place-items: center; }
+  #codeView, #previewView { position: absolute; inset: 0; }
+  #previewView { display: none; padding: 18px; place-items: center; overflow: auto; }
   #previewView.show { display: grid; }
   #codeView.hide { display: none; }
-  pre#code {
-    margin: 0; padding: 16px 18px; font: 13px/1.6 "Cascadia Code", "Consolas", ui-monospace, monospace;
-    color: var(--text); white-space: pre; tab-size: 2;
+  /* editor de codigo: textarea transparente sobre un <pre> resaltado, alineados */
+  .code-edit pre, .code-edit textarea {
+    margin: 0; position: absolute; inset: 0; padding: 16px 18px; border: 0;
+    font: 13px/1.6 "Cascadia Code", "Consolas", ui-monospace, monospace;
+    white-space: pre; tab-size: 2; overflow: auto; letter-spacing: normal; word-spacing: normal;
   }
+  .code-edit pre { color: var(--text); pointer-events: none; z-index: 0; }
+  .code-edit textarea {
+    color: transparent; background: transparent; caret-color: var(--accent);
+    resize: none; outline: none; z-index: 1;
+  }
+  #codeErr {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+    background: #ff6b6b; color: #2a0606; font: 600 12px/1.4 inherit;
+    padding: 7px 14px; display: none;
+  }
+  #codeErr.show { display: block; }
+  :root.light #codeErr { color: #4a0606; }
   .tok-kw { color: #b07cff; font-weight: 700; }
   .tok-id { color: #6fd3ff; }
   .tok-str { color: var(--ok); }
@@ -252,6 +266,7 @@
       <p class="tip">
         <b>Conectar:</b> pasa el raton sobre un nodo y arrastra desde uno de sus puntos azules hasta otro nodo.<br><br>
         <b>Editar texto:</b> doble clic en un nodo o en una flecha.<br><br>
+        <b>Editar el codigo:</b> escribe en el panel derecho y el diagrama se actualiza solo.<br><br>
         <b>Mover el lienzo:</b> arrastra el fondo. <b>Zoom:</b> rueda del raton.<br><br>
         <kbd>Supr</kbd> borra lo seleccionado · <kbd>Ctrl</kbd>+<kbd>Z</kbd> deshace.
       </p>
@@ -312,7 +327,11 @@
       <button class="btn" id="dlPng">.png</button>
     </div>
     <div class="content">
-      <div id="codeView"><pre id="code"></pre></div>
+      <div id="codeView" class="code-edit">
+        <pre id="codeHl" aria-hidden="true"></pre>
+        <textarea id="codeInput" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"></textarea>
+        <div id="codeErr"></div>
+      </div>
       <div id="previewView">
         <div id="previewHost"><div class="empty">Sin nodos todavia.</div></div>
         <div id="previewErr"></div>

@@ -8,6 +8,30 @@ herramienta** (cada carpeta lleva su propia versión).
 
 ---
 
+## [Mermaid 1.1.0] - 2026-07-29
+
+Edición del código en los dos sentidos.
+
+### Añadido
+
+- El panel de código pasa de solo lectura a **editable**: lo que escribe el
+  usuario se parsea y reconstruye el lienzo en tiempo real. Se conserva la
+  posición de los nodos existentes (por id) y los nuevos se autoubican (cerca de
+  sus vecinos, o por capas si el código es nuevo del todo).
+- Parser del subconjunto de `flowchart` que genera el editor: cabecera, las 8
+  formas, las 4 flechas con etiqueta `|"..."|`, cadenas `A --> B --> C` y líneas
+  `style`. Ante un error de sintaxis, el lienzo no se toca y se muestra un aviso.
+
+### Cambiado
+
+- El panel de código es ahora un `<textarea>` transparente superpuesto a un
+  `<pre>` resaltado, alineados y con scroll sincronizado, para mantener el
+  resaltado de sintaxis mientras se edita.
+- El teclado global (Supr, Ctrl+Z...) deja de interceptarse cuando el foco está
+  en el editor de código, para no pisar su edición nativa.
+
+---
+
 ## [Mermaid 1.0.0] - 2026-07-28
 
 Primera versión. Editor gráfico de diagramas de flujo que genera el código

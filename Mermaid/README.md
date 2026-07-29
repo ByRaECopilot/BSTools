@@ -46,7 +46,10 @@ registro guardan rutas absolutas).
    sus lados. Arrastra desde uno de ellos hasta otro nodo para crear una flecha.
 3. **Edita el texto.** Doble clic en un nodo o en una flecha.
 4. **El código aparece solo** en el panel derecho, actualizándose con cada
-   cambio. La pestaña *Vista previa* muestra el diagrama renderizado por Mermaid.
+   cambio. Y al revés: **puedes editar el código a mano y el diagrama se
+   actualiza** — cambia una etiqueta, añade un nodo o una flecha en el texto y
+   el lienzo se reconstruye solo. La pestaña *Vista previa* muestra el diagrama
+   renderizado por Mermaid.
 5. **Exporta:** botón *Copiar* (al portapapeles), o descarga `.mmd`, `.svg` o
    `.png`.
 
@@ -60,6 +63,7 @@ editor sigue donde lo dejaste.
 | Mover un nodo | Arrastrarlo |
 | Conectar | Arrastrar desde un punto azul del nodo a otro nodo |
 | Editar texto | Doble clic en nodo o flecha |
+| Editar el código | Escribir en el panel derecho (el diagrama se actualiza) |
 | Seleccionar | Clic (aparece una barra con color / editar / borrar) |
 | Borrar | Tecla `Supr` con algo seleccionado |
 | Deshacer / rehacer | `Ctrl+Z` / `Ctrl+Y` |
@@ -85,11 +89,24 @@ traduce a una línea `style` en el código.
 
 ---
 
+## Editar el código a mano
+
+El panel de código es editable y funciona en los dos sentidos: lo que escribas
+se parsea y se vuelca al lienzo. Se conserva la posición de los nodos que ya
+existían (por su id) y los nuevos se colocan cerca de sus vecinos. Si el texto
+tiene un error de sintaxis, el lienzo se queda como estaba y aparece un aviso
+rojo hasta que lo corrijas.
+
+El parser cubre el subconjunto de `flowchart` que genera el editor: las 8
+formas, las 4 flechas (con etiqueta `|"..."|`), cadenas `A --> B --> C` y líneas
+`style`. Puedes pegar un diagrama de flujo escrito a mano y, si usa esas
+construcciones, se dibujará; construcciones de Mermaid fuera de ese subconjunto
+darán error.
+
+---
+
 ## Lo que no hace (y por qué)
 
-- **No importa un `.mmd` existente** para editarlo gráficamente. Convertir texto
-  Mermaid arbitrario de vuelta a nodos posicionados es un analizador completo, y
-  el objetivo aquí es el camino contrario: del dibujo al código.
 - **Solo diagramas de flujo** (`flowchart`). Secuencia, Gantt, clases, etc.
   tienen otra gramática y otra interacción; se puede añadir más adelante si hace
   falta.

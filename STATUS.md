@@ -5,7 +5,7 @@ Para el histórico de cambios, ver [CHANGELOG.md](CHANGELOG.md).
 Para las convenciones de desarrollo, ver [CLAUDE.md](CLAUDE.md).
 Para construir una herramienta nueva, ver [SPEC.md](SPEC.md).
 
-**Última actualización:** 2026-07-28
+**Última actualización:** 2026-07-29
 
 ---
 
@@ -16,7 +16,7 @@ Para construir una herramienta nueva, ver [SPEC.md](SPEC.md).
 | [PDF2MD](PDF2MD/) | 1.0.0 | Estable | Probado de punta a punta. En uso. |
 | [Limpiar Temporales](Limpiar%20Temporales/) | 2.0.0 | Estable | Tarea de arranque silenciosa, sin confirmación. Probado. |
 | [BrandAssets](BrandAssets/) | 1.0.0 | Estable | Iconos de PWA desde un PNG 1024. Probado de punta a punta. |
-| [Mermaid](Mermaid/) | 1.0.0 | Estable | Editor grafico de diagramas de flujo, cliente puro. Probado de punta a punta. |
+| [Mermaid](Mermaid/) | 1.1.0 | Estable | Editor grafico de diagramas de flujo, cliente puro. Edicion de codigo bidireccional. Probado de punta a punta. |
 
 ---
 
@@ -124,19 +124,28 @@ puertos, mover/panear/zoom, deshacer-rehacer, autoguardado en `localStorage`,
 generacion de codigo con escapado de comillas (`#quot;`) y `<`/`>`, vista previa
 con Mermaid y exportacion a `.mmd`, `.svg` y `.png`.
 
+**Edicion bidireccional (v1.1.0).** El panel de codigo es editable: lo que
+escribe el usuario se parsea (con retardo) y reconstruye el lienzo. Se conserva
+la posicion de los nodos existentes (por id) y los nuevos se autoubican cerca de
+sus vecinos (o por capas si el codigo es nuevo del todo). Si el texto no encaja
+en el subconjunto soportado, el lienzo no se toca y sale un aviso rojo. El editor
+es un `<textarea>` transparente superpuesto a un `<pre>` resaltado, alineados
+pixel a pixel (mismo font/padding/line-height, scroll sincronizado).
+
 **Decisiones de diseno:**
 
-- **Del dibujo al codigo, no al reves.** No importa un `.mmd` existente: analizar
-  texto Mermaid arbitrario y reconstruir posiciones es un parser completo y no es
-  el objetivo. El menu contextual en `.mmd` solo abre el editor.
 - **Lienzo SVG propio** para la edicion (arrastrar/conectar), y Mermaid solo para
   la vista previa y el export. Separar ambos evita depender del render de Mermaid
   para la interaccion, que debe ser instantanea.
+- **El parser cubre solo lo que el editor genera** (`flowchart` con las 8 formas,
+  4 flechas, cadenas y `style`), no Mermaid arbitrario. Es la ida y vuelta de
+  nuestro propio formato, no un parser general de Mermaid.
 - **Libreria empaquetada** (`vendor/mermaid.min.js`, ~3,5 MB) en vez de CDN: fiel
   a la filosofia del repo (sin dependencias de red en runtime, funciona offline).
 
-**No hace:** importar `.mmd`, ni otros tipos de diagrama (secuencia, Gantt,
-clases...). Solo `flowchart`.
+**No hace:** otros tipos de diagrama (secuencia, Gantt, clases...). Solo
+`flowchart`. El menu contextual en `.mmd` abre el editor (no carga el archivo
+automaticamente; para editarlo, pega su contenido en el panel de codigo).
 
 **Probado:** servido por HTTP local y verificado por JS de punta a punta -- carga
 del ejemplo (5 nodos/5 aristas), paleta de 8 formas, generacion de codigo con
@@ -163,8 +172,9 @@ Nada bloqueante. Ideas para más adelante, sin compromiso:
 - Herramientas nuevas: aún sin decidir.
 - BrandAssets: generar `favicon.svg` cuando la entrada ya sea un SVG, y
   plantillas de captura para el `screenshots` del manifest.
-- Mermaid: mas tipos de diagrama (secuencia, clases), e importar `.mmd` (requiere
-  un parser). Autoruteo ortogonal de las flechas.
+- Mermaid: mas tipos de diagrama (secuencia, clases). Cargar el `.mmd` del menu
+  contextual directamente en el editor (hoy hay que pegar el contenido).
+  Autoruteo ortogonal de las flechas.
 
 ---
 
