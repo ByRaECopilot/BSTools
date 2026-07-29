@@ -47,20 +47,28 @@ Elige uno antes de escribir nada. Determina qué hace `install.ps1`.
 |---|---|---|
 | **Menú contextual** | La acción se aplica a un archivo o carpeta concretos | PDF2MD |
 | **Tarea programada** | Se ejecuta sola, sin que el usuario la invoque | Limpiar Temporales |
-| **Interfaz web local** | Hace falta un formulario o UI **y** el servidor toca el disco / procesa | BrandAssets |
-| **Cliente puro** | UI visual que se resuelve entera en el navegador, sin tocar el disco desde el servidor | Mermaid |
+| **Interfaz web local** | Hace falta un formulario o UI **y** el servidor toca el disco / procesa | BrandAssets, Mermaid |
+| **Cliente puro** | UI visual que se resuelve entera en el navegador, sin tocar el disco desde el servidor | (sin ejemplo actual) |
 
 Se pueden combinar: BrandAssets tiene interfaz web **y** entrada de menú
 contextual en los `.png` que la abre con la imagen ya cargada; Mermaid tiene
-acceso directo **y** entrada de menú contextual en los `.mmd`.
+acceso directo **y** entrada de menú contextual en los `.mmd` que abre el archivo
+ya cargado.
 
 **Web local vs. cliente puro.** Si el navegador necesita que un proceso escriba
 archivos, ejecute algo o procese imágenes, hace falta el servidor local (patrón
 *Interfaz web local*: `http.server` en `127.0.0.1` + token). Si todo —incluida
-la exportación, vía descargas del navegador— se resuelve en el propio HTML, no
-montes servidor: el lanzador hace `start index.html` y el acceso directo apunta
-directo al HTML (cero ventanas de consola). Empaqueta cualquier librería en
-`vendor/` para no depender de la red.
+la exportación, vía descargas del navegador— se resuelve en el propio HTML,
+puedes ahorrarte el servidor: el lanzador hace `start index.html` y el acceso
+directo apunta directo al HTML (cero ventanas de consola). Empaqueta cualquier
+librería en `vendor/` para no depender de la red.
+
+**Aviso por experiencia (Mermaid):** el cliente puro es tentador por lo ligero,
+pero en cuanto pidas *guardar en una carpeta del proyecto* topas con que
+`file://` no puede escribir en disco (ni la File System Access API funciona ahí).
+Si intuyes que la herramienta acabará guardando/cargando archivos, arranca ya con
+servidor local: migrar de cliente puro a servidor a mitad de camino cuesta más
+que empezar bien. Mermaid nació cliente puro y tuvo que migrar en la v1.3.0.
 
 Lo que **no** hacemos: instaladores binarios, servicios en segundo plano,
 entradas en el arranque que no sean una tarea programada visible, ni

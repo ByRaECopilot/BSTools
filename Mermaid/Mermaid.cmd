@@ -2,9 +2,34 @@
 setlocal
 title Mermaid - BSTools
 
-rem Abre el editor grafico de Mermaid en el navegador por defecto.
-rem Es una aplicacion de una sola pagina: no necesita Python ni servidor,
-rem se abre directamente el archivo local.
+rem Arranca el servidor local del editor Mermaid y abre el navegador.
+rem Acepta un archivo .mmd como primer argumento (se precarga en el editor).
 
-start "" "%~dp0index.html"
-exit /b 0
+set "SCRIPT=%~dp0server.py"
+
+rem --- Localizar Python -----------------------------------------------------
+set "PY="
+where py >nul 2>&1 && set "PY=py -3"
+if not defined PY (
+    where python >nul 2>&1 && set "PY=python"
+)
+if not defined PY (
+    echo.
+    echo   No se ha encontrado Python en el sistema.
+    echo   Instalalo desde https://www.python.org/downloads/
+    echo   ^(marca "Add Python to PATH" durante la instalacion^)
+    echo.
+    pause
+    exit /b 9009
+)
+
+%PY% "%SCRIPT%" %*
+set "RC=%ERRORLEVEL%"
+
+if not "%RC%"=="0" (
+    echo.
+    echo   El servidor de Mermaid ha terminado con error ^(codigo %RC%^).
+    pause
+)
+
+exit /b %RC%

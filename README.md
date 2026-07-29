@@ -88,10 +88,12 @@ BSTools/
     ├── install.ps1
     ├── uninstall.ps1
     ├── Mermaid.cmd
+    ├── server.py
     ├── index.html
     ├── editor.js
     ├── icon.ico
     ├── vendor/mermaid.min.js
+    ├── graphs/            diagramas guardados (locales, en .gitignore)
     └── README.md
 ```
 

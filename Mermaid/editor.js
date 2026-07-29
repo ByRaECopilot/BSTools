@@ -1066,6 +1066,106 @@ window.addEventListener('keydown', (ev) => {
 window.addEventListener('resize', positionFloatbar);
 
 // =============================================================================
+//  Guardar / cargar en el servidor local (carpeta graphs/)
+// =============================================================================
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+const SERVER = location.protocol === 'http:' && !!TOKEN;
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    method: opts.method || 'GET',
+    headers: Object.assign({ 'X-Token': TOKEN }, opts.body ? { 'Content-Type': 'application/json' } : {}),
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+function fmtDate(sec) {
+  try {
+    const d = new Date(sec * 1000);
+    return d.toLocaleDateString() + ' ' + d.toTimeString().slice(0, 5);
+  } catch { return ''; }
+}
+
+// Reemplaza el diagrama actual por un estado guardado (con sus posiciones).
+function setStateFrom(s) {
+  if (!s || !Array.isArray(s.nodes)) return false;
+  state = { dir: s.dir || 'TD', seq: s.seq || 0, nodes: s.nodes, edges: s.edges || [] };
+  state.nodes.forEach(sizeNode);
+  selection = null;
+  undoStack = []; redoStack = []; refreshUndoButtons();
+  syncDirButtons();
+  render();
+  fitView();
+  return true;
+}
+
+async function refreshSavedList() {
+  const list = $('#savedList');
+  try {
+    const { graphs } = await api('/list');
+    if (!graphs.length) { list.innerHTML = '<div class="saved-empty">No hay diagramas guardados.</div>'; return; }
+    list.innerHTML = '';
+    for (const g of graphs) {
+      const item = document.createElement('div');
+      item.className = 'saved-item';
+      item.innerHTML = '<span class="nm"></span><span class="dt"></span><button class="del" title="Borrar">&#10005;</button>';
+      item.querySelector('.nm').textContent = g.name;
+      item.querySelector('.dt').textContent = fmtDate(g.savedAt);
+      const open = () => loadGraph(g.name);
+      item.querySelector('.nm').onclick = open;
+      item.querySelector('.dt').onclick = open;
+      item.querySelector('.del').onclick = (e) => { e.stopPropagation(); deleteGraph(g.name); };
+      list.appendChild(item);
+    }
+  } catch (_) { /* servidor no disponible: se ignora */ }
+}
+
+async function saveGraph() {
+  const name = $('#graphName').value.trim();
+  if (!name) { toast('Escribe un nombre'); $('#graphName').focus(); return; }
+  try {
+    await api('/save', { method: 'POST', body: { name, mmd: currentCode(), state } });
+    toast('Guardado: ' + name);
+    refreshSavedList();
+  } catch (e) { toast('No se pudo guardar: ' + e.message); }
+}
+
+async function loadGraph(name) {
+  try {
+    const data = await api('/load?name=' + encodeURIComponent(name));
+    if (data.state && setStateFrom(data.state)) {
+      // ok, restaurado con posiciones
+    } else if (data.mmd) {
+      applyParsed(parseCode(data.mmd).data);
+    } else {
+      toast('El diagrama esta vacio'); return;
+    }
+    $('#graphName').value = name;
+    toast('Cargado: ' + name);
+  } catch (e) { toast('No se pudo cargar: ' + e.message); }
+}
+
+async function deleteGraph(name) {
+  if (!confirm('Borrar el diagrama "' + name + '"? (borra el .mmd y el .layout.json)')) return;
+  try { await api('/delete', { method: 'POST', body: { name } }); toast('Borrado: ' + name); refreshSavedList(); }
+  catch (e) { toast('No se pudo borrar: ' + e.message); }
+}
+
+if (SERVER) {
+  $('#saveGraph').onclick = saveGraph;
+  $('#graphName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveGraph(); } });
+} else {
+  $('#saveSection').querySelector('.saverow').style.display = 'none';
+  $('#savedList').style.display = 'none';
+  const h = $('#saveHint');
+  h.hidden = false;
+  h.textContent = 'Guardar y cargar estan disponibles al abrir con el lanzador Mermaid (servidor local).';
+}
+
+// =============================================================================
 //  Arranque
 // =============================================================================
 function seedExample() {
@@ -1081,15 +1181,30 @@ function seedExample() {
   addEdge(d.id, b.id);
 }
 
-(function init() {
+(async function init() {
   const savedTheme = localStorage.getItem('bstools.mermaid.theme');
   const light = savedTheme === 'light';
   if (light) document.documentElement.classList.add('light');
   mermaid.initialize({ startOnLoad: false, theme: light ? 'default' : 'dark', securityLevel: 'loose' });
 
   buildPalette();
-  if (!load()) seedExample();
+
+  // Si se abrio con un .mmd (menu contextual), se precarga; si trae layout, con
+  // sus posiciones. Si no, se restaura la ultima sesion o el ejemplo.
+  let loaded = false;
+  if (SERVER) {
+    try {
+      const pre = await api('/preload');
+      if (pre && pre.state && setStateFrom(pre.state)) loaded = true;
+      else if (pre && pre.mmd) { applyParsed(parseCode(pre.mmd).data); loaded = true; }
+      if (loaded && pre.name) $('#graphName').value = pre.name;
+    } catch (_) { /* sin precarga */ }
+  }
+  if (!loaded && !load()) seedExample();
+
   syncDirButtons();
   render();
   fitView();
+
+  if (SERVER) refreshSavedList();
 })();

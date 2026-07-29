@@ -16,7 +16,7 @@ Para construir una herramienta nueva, ver [SPEC.md](SPEC.md).
 | [PDF2MD](PDF2MD/) | 1.0.0 | Estable | Probado de punta a punta. En uso. |
 | [Limpiar Temporales](Limpiar%20Temporales/) | 2.0.0 | Estable | Tarea de arranque silenciosa, sin confirmación. Probado. |
 | [BrandAssets](BrandAssets/) | 1.0.0 | Estable | Iconos de PWA desde un PNG 1024. Probado de punta a punta. |
-| [Mermaid](Mermaid/) | 1.2.0 | Estable | Editor grafico de diagramas de flujo, cliente puro. Edicion bidireccional; el parser digiere el flowchart tipico de una IA. Probado de punta a punta. |
+| [Mermaid](Mermaid/) | 1.3.0 | Estable | Editor grafico de diagramas de flujo. Edicion bidireccional; guarda/carga en graphs/ via servidor local. Probado de punta a punta. |
 
 ---
 
@@ -113,16 +113,29 @@ codigo `flowchart` de Mermaid se genera en tiempo real. Motor de render (para la
 vista previa y la exportacion SVG/PNG): la propia libreria Mermaid, empaquetada
 en `vendor/`.
 
-**Patron nuevo: cliente puro.** Es la primera herramienta sin Python ni servidor.
-El lanzador solo hace `start index.html`; el acceso directo apunta directamente
-al HTML, asi que al abrirlo no hay ninguna ventana de consola, solo el navegador.
-Todo (logica, estilos, libreria) vive en la carpeta y funciona sin internet.
+**Patron: interfaz web local.** Nacio como *cliente puro* (v1.0-1.2, sin Python
+ni servidor: el acceso directo abria el `index.html` directamente). En v1.3.0
+paso a **servidor local** (patron de BrandAssets) para poder guardar y cargar
+diagramas en disco, algo que `file://` no permite. El lanzador arranca
+`server.py` (biblioteca estandar, `127.0.0.1`, puerto libre, token) minimizado y
+abre el navegador. La libreria Mermaid sigue empaquetada: funciona sin internet.
 
 **Funciona:** 8 formas, 4 tipos de flecha, 4 direcciones, color de nodo (via
 `style`), editar etiquetas de nodo y de flecha, conexion arrastrando desde los
 puertos, mover/panear/zoom, deshacer-rehacer, autoguardado en `localStorage`,
 generacion de codigo con escapado de comillas (`#quot;`) y `<`/`>`, vista previa
 con Mermaid y exportacion a `.mmd`, `.svg` y `.png`.
+
+**Guardar / cargar (v1.3.0).** Cada diagrama se guarda como dos archivos en
+`graphs/`: `<nombre>.mmd` (el codigo) y `<nombre>.layout.json` (el estado
+completo con posiciones, formas, colores y direccion). La barra izquierda tiene
+un campo de nombre, boton *Guardar* y la lista de guardados (clic para cargar,
+✕ para borrar). El menu contextual de un `.mmd` abre el editor con ese archivo
+ya cargado (y sus posiciones si hay un `.layout.json` al lado): resuelve la idea
+que quedaba pendiente. Endpoints del servidor: `/save`, `/load`, `/list`,
+`/delete`, `/preload`, `/quit`; nombres saneados (sin travesia de rutas). Si el
+`index.html` se abre suelto por `file://`, la seccion de guardado se oculta con
+un aviso (no hay servidor). `graphs/` va en `.gitignore`.
 
 **Edicion bidireccional (v1.1.0).** El panel de codigo es editable: lo que
 escribe el usuario se parsea (con retardo) y reconstruye el lienzo. Se conserva
@@ -146,23 +159,27 @@ pixel a pixel (mismo font/padding/line-height, scroll sincronizado).
 - **Libreria empaquetada** (`vendor/mermaid.min.js`, ~3,5 MB) en vez de CDN: fiel
   a la filosofia del repo (sin dependencias de red en runtime, funciona offline).
 
-**No hace:** otros tipos de diagrama (secuencia, Gantt, clases...). Solo
-`flowchart`. El menu contextual en `.mmd` abre el editor (no carga el archivo
-automaticamente; para editarlo, pega su contenido en el panel de codigo).
+- **Servidor solo para disco** (v1.3.0): el guardado/carga necesita escribir en
+  `graphs/`, y `file://` no puede; de ahi el paso a servidor local. Todo lo demas
+  (editar, parsear, render, export) sigue en el cliente. El export a `.svg`/`.png`
+  no cambio: sigue siendo descarga del navegador, no lo escribe el servidor.
 
-**Probado:** servido por HTTP local y verificado por JS de punta a punta -- carga
-del ejemplo (5 nodos/5 aristas), paleta de 8 formas, generacion de codigo con
-escapado, render con Mermaid del ejemplo y de un nodo con comillas y `<test>`,
-conexion por arrastre simulando pointer events (puerto -> nodo destino),
-deshacer, y exportacion SVG (~100 KB) y PNG. Registro del menu contextual y
-acceso directo (destino = index.html, icono propio) verificados. Nivel 2 (file://
-en navegador real) queda al usuario: el panel de preview del entorno trata
-file:// como snapshot estatico y no ejecuta el JS, por eso la prueba se hizo por
-HTTP -- el unico camino distinto en file:// es la carga de scripts locales, que
-para scripts clasicos y una libreria UMD funciona igual. Comprobado ademas que el
-bundle de Mermaid no usa `import()` dinamico (0 ocurrencias): trae todos los
-diagramas estaticos, asi que la vista previa no depende de fetch de modulos y no
-rompe bajo file:// por CORS.
+**No hace:** otros tipos de diagrama (secuencia, Gantt, clases...). Solo
+`flowchart`. No importa un `.mmd` arbitrario al *lienzo* mas alla del subconjunto
+soportado (la Vista previa si lo pinta).
+
+**Probado:** servido por el propio `server.py` y verificado de punta a punta. UI
+(JS): precarga desde `.mmd`+`.layout.json` aplicada, guardar -> listar -> vaciar
+-> cargar recuperando la posicion exacta (x=555), borrar. Endpoints (curl):
+token exigido en `/` y en las rutas de disco (403 sin el), estaticos servidos sin
+token, `/save` escribe los dos archivos, travesia `../../evil` saneada a `evil`
+DENTRO de `graphs/` (nada escapo), `/load`, `/delete` (borra ambos), `/preload`
+con y sin argumento, `/quit` detiene el servidor. Registro (`command ... "%1"`) y
+acceso directo (destino = Mermaid.cmd, minimizado, icono propio) verificados.
+Nivel 2 (navegador real desde el lanzador) queda al usuario: el panel de preview
+del entorno no ejecuta JS, por eso se probo sirviendo por HTTP. Historico
+(v1.0-1.2): el bundle de Mermaid no usa `import()` dinamico, asi que la vista
+previa nunca dependio de fetch de modulos.
 
 ---
 

@@ -4,10 +4,11 @@ Editor gráfico de diagramas de flujo. Arrastras formas, las unes con flechas y
 el **código Mermaid se genera en tiempo real**. Con vista previa del diagrama
 renderizado y exportación a `.mmd`, `.svg` y `.png`.
 
-Doble clic en el icono **Mermaid** de esta carpeta → se abre en tu navegador. Es
-una aplicación de una sola página: **no necesita Python, ni servidor, ni
-conexión a internet**. Todo (incluida la librería Mermaid) va dentro de la
-carpeta.
+Doble clic en el icono **Mermaid** de esta carpeta → arranca un pequeño servidor
+local (en `127.0.0.1`) y se abre en tu navegador. Necesita **Python** (solo la
+biblioteca estándar; no instala nada) y funciona **sin conexión a internet** —
+la librería Mermaid va empaquetada en la carpeta. El servidor solo sirve para
+**guardar y cargar** tus diagramas en la subcarpeta `graphs/`.
 
 ---
 
@@ -20,11 +21,14 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 El instalador:
 
-1. Crea el acceso directo **Mermaid** dentro de esta carpeta, con icono propio.
-   Apunta directamente al `index.html`, así que al abrirlo no aparece ninguna
-   ventana de consola, solo el navegador.
-2. Añade al menú contextual de los archivos `.mmd` la opción *Abrir con el
-   editor Mermaid*.
+1. Comprueba que hay **Python** (no instala dependencias: el servidor usa solo la
+   biblioteca estándar).
+2. Crea el acceso directo **Mermaid** dentro de esta carpeta, con icono propio.
+   Apunta al lanzador, que arranca el servidor **minimizado** (la consola no
+   molesta) y abre el navegador.
+3. Añade al menú contextual de los archivos `.mmd` la opción *Abrir con el
+   editor Mermaid*, que lo abre **ya cargado** (con sus posiciones si al lado hay
+   un `.layout.json`).
 
 Escribe en `HKCU:\Software\Classes`: **no necesita administrador**.
 
@@ -55,6 +59,23 @@ registro guardan rutas absolutas).
 
 El diagrama se guarda solo en el navegador (`localStorage`): al reabrir el
 editor sigue donde lo dejaste.
+
+## Guardar y cargar (carpeta `graphs/`)
+
+En la barra izquierda, sección **Diagramas**: escribe un nombre y pulsa
+*Guardar*. Cada diagrama se guarda como **dos archivos** en `graphs/`:
+
+- `nombre.mmd` — el código Mermaid, reutilizable en cualquier sitio.
+- `nombre.layout.json` — posiciones, formas, colores y dirección, para restaurar
+  el lienzo **exactamente** como lo dejaste.
+
+Debajo aparece la lista de diagramas guardados: clic en uno para cargarlo, o en
+la **✕** para borrarlo (borra sus dos archivos). Al abrir un `.mmd` desde el
+menú contextual del Explorador, se carga directamente; si tiene un
+`.layout.json` al lado, con sus posiciones.
+
+La carpeta `graphs/` está en `.gitignore`: tus diagramas son locales, no se
+suben al repositorio.
 
 ### Controles
 

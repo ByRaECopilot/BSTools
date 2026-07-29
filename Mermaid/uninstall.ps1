@@ -37,4 +37,4 @@ else {
     Write-Host 'Mermaid desinstalado.' -ForegroundColor Green
 }
 
-Write-Host 'Los diagramas que hayas exportado no se tocan.' -ForegroundColor DarkGray
+Write-Host 'Tus diagramas en la carpeta graphs\ no se tocan.' -ForegroundColor DarkGray

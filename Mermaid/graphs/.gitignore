@@ -1,0 +1,4 @@
+# Los diagramas guardados son locales: no se versionan.
+# Esta carpeta si se mantiene en el repo (por este .gitignore).
+*
+!.gitignore

@@ -118,6 +118,27 @@
   }
   .pick button.active { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
 
+  /* guardar / cargar */
+  .saverow { display: flex; gap: 7px; }
+  .saverow input {
+    flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+    font: inherit; font-size: 13px;
+  }
+  .saverow input:focus { outline: none; border-color: var(--accent); }
+  .saverow .btn { padding: 8px 12px; }
+  .saved-list { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+  .saved-item {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 7px;
+    border: 1px solid transparent; cursor: pointer; font-size: 13px;
+  }
+  .saved-item:hover { background: var(--panel-2); border-color: var(--line); }
+  .saved-item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .saved-item .dt { color: var(--muted); font-size: 11px; }
+  .saved-item .del { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 2px 5px; border-radius: 5px; font-size: 14px; line-height: 1; }
+  .saved-item .del:hover { color: var(--danger); background: var(--bg); }
+  .saved-empty { color: var(--muted); font-size: 12px; padding: 4px 2px; }
+
   .tip { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 8px; }
   .tip kbd {
     background: var(--panel-2); border: 1px solid var(--line-2); border-bottom-width: 2px;
@@ -261,6 +282,16 @@
         <button data-es="thick">Gruesa  ==&gt;</button>
       </div>
     </div>
+    <div class="section" id="saveSection">
+      <h3>Diagramas</h3>
+      <div class="saverow">
+        <input type="text" id="graphName" placeholder="nombre del diagrama" spellcheck="false">
+        <button class="btn primary" id="saveGraph">Guardar</button>
+      </div>
+      <div class="saved-list" id="savedList"></div>
+      <p class="tip" id="saveHint" hidden></p>
+    </div>
+
     <div class="section">
       <h3>Ayuda</h3>
       <p class="tip">

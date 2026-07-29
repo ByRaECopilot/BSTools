@@ -8,6 +8,41 @@ herramienta** (cada carpeta lleva su propia versión).
 
 ---
 
+## [Mermaid 1.3.0] - 2026-07-29
+
+Guardar y cargar diagramas en la subcarpeta `graphs/`. Para poder escribir en
+disco, la herramienta pasa de **cliente puro** a **interfaz web local** (servidor
+Python, patrón de BrandAssets).
+
+### Añadido
+
+- `server.py`: servidor local (biblioteca estándar, `127.0.0.1`, puerto libre,
+  token) que sirve el editor y expone `/save`, `/load`, `/list`, `/delete`,
+  `/preload` y `/quit`. Los nombres se sanean (sin travesía de rutas).
+- Guardado en dos archivos por diagrama: `<nombre>.mmd` (código) y
+  `<nombre>.layout.json` (estado completo con posiciones, formas, colores y
+  dirección). Carpeta `graphs/` con su propio `.gitignore`.
+- Sección **Diagramas** en la barra izquierda: campo de nombre, *Guardar* y lista
+  de guardados (clic para cargar, ✕ para borrar).
+- El menú contextual de un `.mmd` ahora **abre el archivo cargado** (y sus
+  posiciones si hay un `.layout.json` al lado): resuelve la idea pendiente.
+
+### Cambiado
+
+- `Mermaid.cmd` arranca el servidor (con detección de Python) en vez de abrir el
+  HTML directamente. El acceso directo apunta al `.cmd`, minimizado.
+- `install.ps1`: comprueba Python, crea el acceso directo al lanzador y pasa `%1`
+  en el menú contextual para precargar el archivo.
+
+### Notas
+
+- Si el `index.html` se abre suelto por `file://`, la sección de guardado se
+  oculta con un aviso (no hay servidor); el resto del editor sigue funcionando.
+- Cuarto patrón de arranque del repo (**cliente puro**) queda sin herramienta que
+  lo use; se mantiene documentado en SPEC como opción válida.
+
+---
+
 ## [Mermaid 1.2.0] - 2026-07-29
 
 El parser código→lienzo pasa de entender solo lo que genera el editor a digerir
