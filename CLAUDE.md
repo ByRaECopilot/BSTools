@@ -7,6 +7,7 @@ Instrucciones para Claude Code al trabajar en este repositorio.
   `uninstall.ps1` y el lanzador. **No hace falta abrir otra herramienta para
   copiar su estructura**; si SPEC.md se queda corto en algo, arréglalo ahí.
 - **Para saber en qué punto está el trabajo: [STATUS.md](STATUS.md).**
+- **Para registrar cambios, hazlo en [CHANGELOG.md](CHANGELOG.md).**
 
 ## El proyecto
 
@@ -21,7 +22,7 @@ Licencia CC0 1.0 (dominio público) — todo lo que se añada va bajo CC0.
 ## Lo imprescindible
 
 Cada herramienta es una carpeta **autocontenida**: alguien debe poder copiar solo
-esa carpeta y que funcione. La estructura, los tres patrones de arranque, el
+esa carpeta y que funcione. La estructura, los cuatro patrones de arranque, el
 contrato con el registro de Windows y las plantillas están en [SPEC.md](SPEC.md).
 
 Cuatro reglas que no se negocian:

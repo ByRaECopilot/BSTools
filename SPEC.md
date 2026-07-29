@@ -39,7 +39,7 @@ romperían los registros ya instalados.
 
 ---
 
-## 3. Los tres patrones de arranque
+## 3. Los cuatro patrones de arranque
 
 Elige uno antes de escribir nada. Determina qué hace `install.ps1`.
 
@@ -47,10 +47,20 @@ Elige uno antes de escribir nada. Determina qué hace `install.ps1`.
 |---|---|---|
 | **Menú contextual** | La acción se aplica a un archivo o carpeta concretos | PDF2MD |
 | **Tarea programada** | Se ejecuta sola, sin que el usuario la invoque | Limpiar Temporales |
-| **Interfaz web local** | Hace falta formulario, previsualización o algo visual | BrandAssets |
+| **Interfaz web local** | Hace falta un formulario o UI **y** el servidor toca el disco / procesa | BrandAssets |
+| **Cliente puro** | UI visual que se resuelve entera en el navegador, sin tocar el disco desde el servidor | Mermaid |
 
 Se pueden combinar: BrandAssets tiene interfaz web **y** entrada de menú
-contextual en los `.png` que la abre con la imagen ya cargada.
+contextual en los `.png` que la abre con la imagen ya cargada; Mermaid tiene
+acceso directo **y** entrada de menú contextual en los `.mmd`.
+
+**Web local vs. cliente puro.** Si el navegador necesita que un proceso escriba
+archivos, ejecute algo o procese imágenes, hace falta el servidor local (patrón
+*Interfaz web local*: `http.server` en `127.0.0.1` + token). Si todo —incluida
+la exportación, vía descargas del navegador— se resuelve en el propio HTML, no
+montes servidor: el lanzador hace `start index.html` y el acceso directo apunta
+directo al HTML (cero ventanas de consola). Empaqueta cualquier librería en
+`vendor/` para no depender de la red.
 
 Lo que **no** hacemos: instaladores binarios, servicios en segundo plano,
 entradas en el arranque que no sean una tarea programada visible, ni
@@ -80,7 +90,9 @@ administrador y el usuario puede desinstalar sin fricción.
 ### Iconos
 
 `"$env:SystemRoot\System32\imageres.dll,-NNN"`. En uso ahora mismo: `-102`
-(documento, PDF2MD) y `-71` (imágenes, BrandAssets). Para elegir otro, abre
+(documento, PDF2MD) y `-71` (imágenes, BrandAssets). Alternativa: un `.ico`
+propio en la carpeta (Mermaid genera el suyo con Pillow en tiempo de desarrollo
+y lo referencia como `icon.ico,0`). Para elegir un índice de `imageres.dll`, abre
 `imageres.dll` o `shell32.dll` con cualquier visor de recursos; **verifica** que
 el índice se ve como esperas antes de dejarlo escrito.
 
@@ -288,7 +300,7 @@ Write-Host 'Nota: PAQUETE sigue instalado. Para quitarlo: pip uninstall PAQUETE'
 registro, accesos directos, tareas programadas. Los datos del usuario (archivos
 ya generados) no se tocan, y se dice.
 
-### Fragmentos de los otros dos patrones
+### Fragmentos de los otros patrones
 
 **Acceso directo con icono propio** (un `.cmd` muestra el icono genérico de
 consola; el `.lnk` permite darle uno y arrancar minimizado):
@@ -305,6 +317,32 @@ $link.Save()
 ```
 
 El `.lnk` lleva rutas absolutas: va al `.gitignore`, no al repositorio.
+
+**Cliente puro** (patrón sin Python ni servidor). El lanzador entero:
+
+```bat
+@echo off
+setlocal
+title NOMBRE - BSTools
+rem Aplicacion de una sola pagina: no necesita Python ni servidor.
+start "" "%~dp0index.html"
+exit /b 0
+```
+
+Y el acceso directo apunta **directo al HTML** (así no hay ninguna ventana de
+consola, ni siquiera un parpadeo):
+
+```powershell
+$link.TargetPath   = Join-Path $toolDir 'index.html'
+$link.IconLocation = (Join-Path $toolDir 'icon.ico') + ',0'
+```
+
+El HTML debe ser autocontenido y funcionar bajo `file://`: scripts clásicos (no
+módulos ES), librerías en `vendor/` cargadas con `<script src>` (una build UMD),
+exportación por descargas de `Blob`, persistencia en `localStorage`. **Ojo al
+probarlo:** el panel de vista previa del entorno trata `file://` como snapshot
+estático y no ejecuta el JS; para verificarlo de verdad, sírvelo con
+`python -m http.server` en `127.0.0.1` y navega por HTTP.
 
 **Tarea programada al iniciar sesión:**
 

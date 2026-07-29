@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mermaid - Editor grafico - BSTools</title>
+<style>
+  :root {
+    --bg: #0e1016;
+    --panel: #161923;
+    --panel-2: #1d212e;
+    --line: #2a2f3d;
+    --line-2: #363c4d;
+    --text: #e8eaf0;
+    --muted: #98a0b3;
+    --accent: #7c8cff;
+    --accent-soft: #7c8cff22;
+    --ok: #47d18a;
+    --danger: #ff6b6b;
+    --shadow: 0 10px 30px rgba(0,0,0,.35);
+    --grid: #ffffff0a;
+    --node-fill: #232838;
+    --node-stroke: #55607d;
+    --node-text: #e8eaf0;
+    --edge: #8a93ab;
+  }
+  :root.light {
+    --bg: #eef1f6;
+    --panel: #ffffff;
+    --panel-2: #f4f6fa;
+    --line: #e1e5ec;
+    --line-2: #d3d9e3;
+    --text: #1a1f2b;
+    --muted: #667085;
+    --accent: #5b6cf0;
+    --accent-soft: #5b6cf01a;
+    --ok: #16a34a;
+    --danger: #e5484d;
+    --shadow: 0 10px 30px rgba(20,30,60,.12);
+    --grid: #1a1f2b0d;
+    --node-fill: #ffffff;
+    --node-stroke: #98a0b3;
+    --node-text: #1a1f2b;
+    --edge: #6b7488;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+    display: grid; grid-template-rows: auto 1fr;
+    height: 100vh; overflow: hidden;
+  }
+
+  /* ---- barra superior ---- */
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 16px; background: var(--panel);
+    border-bottom: 1px solid var(--line); z-index: 20;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .2px; }
+  .brand .logo {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: linear-gradient(135deg, var(--accent), #b07cff);
+    display: grid; place-items: center; color: #fff; font-size: 15px;
+    box-shadow: 0 3px 10px #7c8cff55;
+  }
+  .brand small { color: var(--muted); font-weight: 500; font-size: 12px; }
+  header .spacer { flex: 1; }
+
+  .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 3px; gap: 2px; }
+  .seg button {
+    border: 0; background: transparent; color: var(--muted);
+    padding: 6px 11px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600;
+  }
+  .seg button.active { background: var(--accent); color: #fff; box-shadow: 0 2px 8px #7c8cff55; }
+  .seg button:hover:not(.active) { color: var(--text); }
+
+  .btn {
+    border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text);
+    padding: 7px 13px; border-radius: 8px; cursor: pointer; font: inherit; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 7px; transition: border-color .12s, background .12s;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.ghost { background: transparent; }
+  .btn svg { width: 16px; height: 16px; }
+  .lbl { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+
+  /* ---- cuerpo ---- */
+  main { display: grid; grid-template-columns: 230px 1fr 380px; min-height: 0; }
+  aside {
+    background: var(--panel); border-right: 1px solid var(--line);
+    padding: 16px; overflow-y: auto;
+  }
+  aside h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+             margin: 0 0 10px; font-weight: 700; }
+  .section + .section { margin-top: 22px; }
+
+  .shapes { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .shape-btn {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 6px 7px; cursor: grab; text-align: center; transition: border-color .12s, transform .06s;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+  .shape-btn:hover { border-color: var(--accent); }
+  .shape-btn:active { transform: scale(.96); }
+  .shape-btn svg { width: 46px; height: 30px; }
+  .shape-btn span { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .shape-btn .sh-fill { fill: var(--node-fill); stroke: var(--node-stroke); stroke-width: 1.6; }
+
+  .rowset { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pick { display: flex; flex-direction: column; gap: 6px; }
+  .pick button {
+    width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--muted); cursor: pointer; font: inherit; font-weight: 600;
+  }
+  .pick button.active { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+
+  .tip { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 8px; }
+  .tip kbd {
+    background: var(--panel-2); border: 1px solid var(--line-2); border-bottom-width: 2px;
+    border-radius: 5px; padding: 1px 6px; font-size: 11px; font-family: inherit; color: var(--text);
+  }
+
+  /* ---- lienzo ---- */
+  .canvas-wrap { position: relative; overflow: hidden; background:
+      radial-gradient(circle at center, var(--panel-2) 0, var(--bg) 90%); }
+  svg#canvas { width: 100%; height: 100%; display: block; cursor: default; touch-action: none; }
+  svg#canvas.panning { cursor: grabbing; }
+  svg#canvas.linking { cursor: crosshair; }
+
+  .node-rect { fill: var(--node-fill); stroke: var(--node-stroke); stroke-width: 1.8; }
+  .node-label { fill: var(--node-text); font-size: 14px; font-weight: 600; dominant-baseline: middle; text-anchor: middle; pointer-events: none; user-select: none; }
+  .node.sel .node-rect { stroke: var(--accent); stroke-width: 2.6; filter: drop-shadow(0 0 6px var(--accent-soft)); }
+  .node { cursor: move; }
+  .port { fill: var(--accent); stroke: var(--bg); stroke-width: 2; opacity: 0; cursor: crosshair; transition: opacity .1s; }
+  .node:hover .port { opacity: 1; }
+  .edge-path { fill: none; stroke: var(--edge); stroke-width: 2; }
+  .edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
+  .edge.sel .edge-path { stroke: var(--accent); stroke-width: 2.6; }
+  .edge-label-bg { fill: var(--bg); opacity: .9; }
+  .edge-label { fill: var(--muted); font-size: 12.5px; font-weight: 600; text-anchor: middle; dominant-baseline: middle; user-select: none; }
+  .temp-edge { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 5; pointer-events: none; }
+
+  /* barra flotante de seleccion */
+  #floatbar {
+    position: absolute; display: none; gap: 6px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px;
+    padding: 6px; box-shadow: var(--shadow); z-index: 15;
+  }
+  #floatbar .swatch { width: 20px; height: 20px; border-radius: 6px; border: 2px solid transparent; cursor: pointer; }
+  #floatbar .swatch:hover { border-color: var(--text); }
+  #floatbar .sep { width: 1px; height: 22px; background: var(--line); }
+  #floatbar .mini { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 4px 7px; border-radius: 6px; font: inherit; font-weight: 600; }
+  #floatbar .mini:hover { background: var(--panel-2); color: var(--text); }
+  #floatbar .mini.danger:hover { color: var(--danger); }
+
+  /* controles de zoom */
+  .zoombar { position: absolute; left: 14px; bottom: 14px; display: flex; gap: 6px; z-index: 12; }
+  .zoombar button {
+    width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line-2);
+    background: var(--panel); color: var(--text); cursor: pointer; font-size: 17px; font-weight: 700;
+    box-shadow: var(--shadow);
+  }
+  .zoombar button:hover { border-color: var(--accent); }
+  .hint { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); color: var(--muted);
+          font-size: 12.5px; background: var(--panel); border: 1px solid var(--line); padding: 6px 14px;
+          border-radius: 999px; box-shadow: var(--shadow); z-index: 12; pointer-events: none; opacity: .9; }
+
+  /* ---- panel derecho ---- */
+  .right { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .right .tabs { display: flex; padding: 12px 14px 0; gap: 8px; }
+  .right .actions { display: flex; flex-wrap: wrap; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .right .content { flex: 1; min-height: 0; position: relative; }
+  #codeView, #previewView { position: absolute; inset: 0; overflow: auto; }
+  #previewView { display: none; padding: 18px; place-items: center; }
+  #previewView.show { display: grid; }
+  #codeView.hide { display: none; }
+  pre#code {
+    margin: 0; padding: 16px 18px; font: 13px/1.6 "Cascadia Code", "Consolas", ui-monospace, monospace;
+    color: var(--text); white-space: pre; tab-size: 2;
+  }
+  .tok-kw { color: #b07cff; font-weight: 700; }
+  .tok-id { color: #6fd3ff; }
+  .tok-str { color: var(--ok); }
+  .tok-arr { color: #ffb454; }
+  #previewSvg { max-width: 100%; }
+  #previewErr { color: var(--danger); font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+  .empty { color: var(--muted); text-align: center; padding: 40px 20px; }
+
+  /* editor inline de etiqueta */
+  #editor {
+    position: absolute; display: none; z-index: 30; border: 2px solid var(--accent);
+    border-radius: 8px; background: var(--panel); color: var(--text); font: 600 14px inherit;
+    padding: 6px 10px; outline: none; box-shadow: var(--shadow); text-align: center;
+  }
+  .toast {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--ok); color: #05240f; font-weight: 700; padding: 10px 18px; border-radius: 10px;
+    box-shadow: var(--shadow); opacity: 0; transition: all .25s; z-index: 50; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 6px; border: 3px solid var(--panel); }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">%</div>
+    <div>Mermaid <small>editor grafico</small></div>
+  </div>
+  <div class="spacer"></div>
+  <span class="lbl">Direccion</span>
+  <div class="seg" id="dir">
+    <button data-dir="TD" class="active" title="Arriba a abajo">TD</button>
+    <button data-dir="LR" title="Izquierda a derecha">LR</button>
+    <button data-dir="BT" title="Abajo a arriba">BT</button>
+    <button data-dir="RL" title="Derecha a izquierda">RL</button>
+  </div>
+  <button class="btn ghost" id="undo" title="Deshacer (Ctrl+Z)" disabled>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg></button>
+  <button class="btn ghost" id="redo" title="Rehacer (Ctrl+Y)" disabled>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h1"/></svg></button>
+  <button class="btn ghost" id="theme" title="Tema claro / oscuro">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></button>
+  <button class="btn ghost" id="clear" title="Vaciar el lienzo">Vaciar</button>
+</header>
+
+<main>
+  <!-- paleta -->
+  <aside>
+    <div class="section">
+      <h3>Formas</h3>
+      <div class="shapes" id="palette"></div>
+      <p class="tip">Arrastra una forma al lienzo, o haz clic para anadirla.</p>
+    </div>
+    <div class="section">
+      <h3>Tipo de flecha</h3>
+      <div class="pick" id="edgeStyle">
+        <button data-es="arrow" class="active">Flecha  --&gt;</button>
+        <button data-es="open">Linea  ---</button>
+        <button data-es="dotted">Punteada  -.-&gt;</button>
+        <button data-es="thick">Gruesa  ==&gt;</button>
+      </div>
+    </div>
+    <div class="section">
+      <h3>Ayuda</h3>
+      <p class="tip">
+        <b>Conectar:</b> pasa el raton sobre un nodo y arrastra desde uno de sus puntos azules hasta otro nodo.<br><br>
+        <b>Editar texto:</b> doble clic en un nodo o en una flecha.<br><br>
+        <b>Mover el lienzo:</b> arrastra el fondo. <b>Zoom:</b> rueda del raton.<br><br>
+        <kbd>Supr</kbd> borra lo seleccionado · <kbd>Ctrl</kbd>+<kbd>Z</kbd> deshace.
+      </p>
+    </div>
+  </aside>
+
+  <!-- lienzo -->
+  <div class="canvas-wrap">
+    <div class="hint" id="hint">Anade una forma desde la izquierda para empezar</div>
+    <svg id="canvas">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--edge)"/>
+        </marker>
+        <marker id="arrowSel" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+        </marker>
+      </defs>
+      <g id="world">
+        <g id="edges"></g>
+        <g id="nodes"></g>
+        <path id="tempEdge" class="temp-edge" style="display:none"></path>
+      </g>
+    </svg>
+    <input id="editor" spellcheck="false">
+    <div id="floatbar">
+      <div class="swatch" data-color="default" style="background:var(--node-fill)" title="Por defecto"></div>
+      <div class="swatch" data-color="#3b82f6" style="background:#3b82f6" title="Azul"></div>
+      <div class="swatch" data-color="#22c55e" style="background:#22c55e" title="Verde"></div>
+      <div class="swatch" data-color="#f59e0b" style="background:#f59e0b" title="Ambar"></div>
+      <div class="swatch" data-color="#ef4444" style="background:#ef4444" title="Rojo"></div>
+      <div class="swatch" data-color="#a855f7" style="background:#a855f7" title="Violeta"></div>
+      <div class="sep"></div>
+      <button class="mini" id="fbEdit">Editar</button>
+      <button class="mini danger" id="fbDel">Borrar</button>
+    </div>
+    <div class="zoombar">
+      <button id="zoomOut">-</button>
+      <button id="zoomFit" style="width:auto;padding:0 12px;font-size:13px">Ajustar</button>
+      <button id="zoomIn">+</button>
+    </div>
+  </div>
+
+  <!-- panel de codigo / preview -->
+  <div class="right">
+    <div class="tabs">
+      <div class="seg" style="flex:1">
+        <button id="tabCode" class="active" style="flex:1">Codigo</button>
+        <button id="tabPreview" style="flex:1">Vista previa</button>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="copy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+        Copiar</button>
+      <button class="btn" id="dlMmd">.mmd</button>
+      <button class="btn" id="dlSvg">.svg</button>
+      <button class="btn" id="dlPng">.png</button>
+    </div>
+    <div class="content">
+      <div id="codeView"><pre id="code"></pre></div>
+      <div id="previewView">
+        <div id="previewHost"><div class="empty">Sin nodos todavia.</div></div>
+        <div id="previewErr"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script src="vendor/mermaid.min.js"></script>
+<script src="editor.js"></script>
+</body>
+</html>

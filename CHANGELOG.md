@@ -8,6 +8,45 @@ herramienta** (cada carpeta lleva su propia versión).
 
 ---
 
+## [Mermaid 1.0.0] - 2026-07-28
+
+Primera versión. Editor gráfico de diagramas de flujo que genera el código
+Mermaid en tiempo real.
+
+### Añadido
+
+- `index.html` + `editor.js`: lienzo SVG propio para arrastrar formas y unirlas
+  con flechas (conexión arrastrando desde los puertos de cada nodo). 8 formas,
+  4 tipos de flecha, 4 direcciones, color de nodo (vía `style`), edición de
+  etiquetas de nodo y de flecha, mover/panear/zoom, deshacer-rehacer y
+  autoguardado en `localStorage`. UI con tema claro/oscuro.
+- Generación del código `flowchart` en vivo, con escapado de comillas
+  (`#quot;`) y de `<`/`>`.
+- Vista previa del diagrama renderizado y exportación a `.mmd`, `.svg` y `.png`,
+  usando la propia librería Mermaid empaquetada en `vendor/mermaid.min.js`.
+- `install.ps1` / `uninstall.ps1`: acceso directo con icono propio (`icon.ico`)
+  apuntando directamente al HTML, y entrada de menú contextual en los `.mmd`.
+
+### Notas
+
+- **Cuarto patrón de arranque del repo: cliente puro.** Primera herramienta sin
+  Python ni servidor; el acceso directo abre el HTML directamente, sin ninguna
+  ventana de consola. Todo funciona sin conexión.
+- No importa `.mmd` existentes (haría falta un parser) ni otros tipos de diagrama
+  más allá de `flowchart`.
+
+---
+
+## [BSTools] - 2026-07-28
+
+### Añadido
+
+- `SPEC.md` gana el **cuarto patrón de arranque, "cliente puro"** (UI que se
+  resuelve entera en el navegador, sin servidor), con su plantilla de lanzador y
+  la nota de que `file://` no ejecuta JS en el panel de vista previa del entorno.
+
+---
+
 ## [BSTools] - 2026-07-22
 
 ### Añadido

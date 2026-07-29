@@ -5,7 +5,7 @@ Para el histórico de cambios, ver [CHANGELOG.md](CHANGELOG.md).
 Para las convenciones de desarrollo, ver [CLAUDE.md](CLAUDE.md).
 Para construir una herramienta nueva, ver [SPEC.md](SPEC.md).
 
-**Última actualización:** 2026-07-22
+**Última actualización:** 2026-07-28
 
 ---
 
@@ -16,6 +16,7 @@ Para construir una herramienta nueva, ver [SPEC.md](SPEC.md).
 | [PDF2MD](PDF2MD/) | 1.0.0 | Estable | Probado de punta a punta. En uso. |
 | [Limpiar Temporales](Limpiar%20Temporales/) | 2.0.0 | Estable | Tarea de arranque silenciosa, sin confirmación. Probado. |
 | [BrandAssets](BrandAssets/) | 1.0.0 | Estable | Iconos de PWA desde un PNG 1024. Probado de punta a punta. |
+| [Mermaid](Mermaid/) | 1.0.0 | Estable | Editor grafico de diagramas de flujo, cliente puro. Probado de punta a punta. |
 
 ---
 
@@ -105,6 +106,54 @@ lanzador `.cmd` desde una carpeta con espacios.
 
 ---
 
+## Mermaid
+
+Editor grafico de diagramas de flujo. Arrastras formas, las unes con flechas y el
+codigo `flowchart` de Mermaid se genera en tiempo real. Motor de render (para la
+vista previa y la exportacion SVG/PNG): la propia libreria Mermaid, empaquetada
+en `vendor/`.
+
+**Patron nuevo: cliente puro.** Es la primera herramienta sin Python ni servidor.
+El lanzador solo hace `start index.html`; el acceso directo apunta directamente
+al HTML, asi que al abrirlo no hay ninguna ventana de consola, solo el navegador.
+Todo (logica, estilos, libreria) vive en la carpeta y funciona sin internet.
+
+**Funciona:** 8 formas, 4 tipos de flecha, 4 direcciones, color de nodo (via
+`style`), editar etiquetas de nodo y de flecha, conexion arrastrando desde los
+puertos, mover/panear/zoom, deshacer-rehacer, autoguardado en `localStorage`,
+generacion de codigo con escapado de comillas (`#quot;`) y `<`/`>`, vista previa
+con Mermaid y exportacion a `.mmd`, `.svg` y `.png`.
+
+**Decisiones de diseno:**
+
+- **Del dibujo al codigo, no al reves.** No importa un `.mmd` existente: analizar
+  texto Mermaid arbitrario y reconstruir posiciones es un parser completo y no es
+  el objetivo. El menu contextual en `.mmd` solo abre el editor.
+- **Lienzo SVG propio** para la edicion (arrastrar/conectar), y Mermaid solo para
+  la vista previa y el export. Separar ambos evita depender del render de Mermaid
+  para la interaccion, que debe ser instantanea.
+- **Libreria empaquetada** (`vendor/mermaid.min.js`, ~3,5 MB) en vez de CDN: fiel
+  a la filosofia del repo (sin dependencias de red en runtime, funciona offline).
+
+**No hace:** importar `.mmd`, ni otros tipos de diagrama (secuencia, Gantt,
+clases...). Solo `flowchart`.
+
+**Probado:** servido por HTTP local y verificado por JS de punta a punta -- carga
+del ejemplo (5 nodos/5 aristas), paleta de 8 formas, generacion de codigo con
+escapado, render con Mermaid del ejemplo y de un nodo con comillas y `<test>`,
+conexion por arrastre simulando pointer events (puerto -> nodo destino),
+deshacer, y exportacion SVG (~100 KB) y PNG. Registro del menu contextual y
+acceso directo (destino = index.html, icono propio) verificados. Nivel 2 (file://
+en navegador real) queda al usuario: el panel de preview del entorno trata
+file:// como snapshot estatico y no ejecuta el JS, por eso la prueba se hizo por
+HTTP -- el unico camino distinto en file:// es la carga de scripts locales, que
+para scripts clasicos y una libreria UMD funciona igual. Comprobado ademas que el
+bundle de Mermaid no usa `import()` dinamico (0 ocurrencias): trae todos los
+diagramas estaticos, asi que la vista previa no depende de fetch de modulos y no
+rompe bajo file:// por CORS.
+
+---
+
 ## Pendiente / ideas
 
 Nada bloqueante. Ideas para más adelante, sin compromiso:
@@ -114,6 +163,8 @@ Nada bloqueante. Ideas para más adelante, sin compromiso:
 - Herramientas nuevas: aún sin decidir.
 - BrandAssets: generar `favicon.svg` cuando la entrada ya sea un SVG, y
   plantillas de captura para el `screenshots` del manifest.
+- Mermaid: mas tipos de diagrama (secuencia, clases), e importar `.mmd` (requiere
+  un parser). Autoruteo ortogonal de las flechas.
 
 ---
 
