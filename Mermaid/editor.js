@@ -371,7 +371,39 @@ function highlight(code) {
 function unquoteLabel(s) {
   s = s.trim();
   if (s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"') s = s.slice(1, -1);
-  return s.replace(/#quot;/g, '"').replace(/<br\s*\/?>/gi, '\n');
+  return s
+    .replace(/#quot;/g, '"')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+}
+
+// Pasa las flechas con texto EN LINEA (estilo `A -. txt .-> B`, `-- txt -->`,
+// `== txt ==>`) a la forma con tuberia (`-.->|"txt"|`, etc.), que es la que sabe
+// dividir el analizador. No toca las flechas compactas (`-->`, `-.->`...).
+function normalizeLinks(line) {
+  return line
+    .replace(/-\.\s*"?([^"|]*?)"?\s*\.->/g, (m, t) => `-.->|"${t.trim()}"|`)
+    .replace(/==\s*"?([^"|=]*?)"?\s*==>/g, (m, t) => `==>|"${t.trim()}"|`)
+    .replace(/--\s+"?([^"|>]*?)"?\s+-->/g, (m, t) => `-->|"${t.trim()}"|`);
+}
+
+// Divide un extremo de flecha por `&` (multidestino de Mermaid: `B & C`),
+// respetando corchetes, parentesis, llaves y comillas.
+function splitAmp(str) {
+  const out = [];
+  let depth = 0, q = false, cur = '';
+  for (const ch of str) {
+    if (ch === '"') q = !q;
+    if (!q) {
+      if (ch === '[' || ch === '(' || ch === '{') depth++;
+      else if (ch === ']' || ch === ')' || ch === '}') depth--;
+      else if (ch === '&' && depth === 0) { out.push(cur); cur = ''; continue; }
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map((s) => s.trim()).filter(Boolean);
 }
 
 // A partir del texto que sigue al id de un nodo (p.ej. `["Etiqueta"]`) deduce
@@ -433,6 +465,11 @@ function parseCode(text) {
       continue;
     }
 
+    // Los subgrupos se aplanan: se conservan sus nodos y flechas, pero no la caja
+    // (nuestro modelo no tiene grupos). Se ignoran las cabeceras, los `end` y las
+    // lineas `direction` internas.
+    if (/^subgraph\b/i.test(line) || /^end$/i.test(line) || /^direction\s/i.test(line)) continue;
+
     const sm = line.match(/^style\s+([A-Za-z_][\w-]*)\s+(.+)$/i);
     if (sm) {
       const strokem = sm[2].match(/stroke:\s*(#[0-9a-fA-F]{3,6})/);
@@ -441,19 +478,21 @@ function parseCode(text) {
     }
 
     // linea de flecha(s) o nodo suelto
-    const parts = line.split(/(-\.->|==>|-->|---)/);
+    const norm = normalizeLinks(line);
+    const parts = norm.split(/(-\.->|==>|-->|---)/);
     if (parts.length >= 3) {
-      let left = parts[0];
+      let leftTok = parts[0];
       for (let k = 1; k < parts.length; k += 2) {
         const style = CONN_STYLE[parts[k]];
         let right = parts[k + 1] || '';
         let label = '';
         const lm = right.match(/^\s*\|\s*"?([^"|]*)"?\s*\|/);
         if (lm) { label = unquoteLabel(lm[1]); right = right.slice(lm[0].length); }
-        const from = ensureNode(left);
-        const to = ensureNode(right);
-        edges.push({ from, to, label, style });
-        left = right;
+        // cada extremo puede ser una lista `A & B`: producto cartesiano de aristas
+        const froms = splitAmp(leftTok).map(ensureNode);
+        const tos = splitAmp(right).map(ensureNode);
+        for (const f of froms) for (const t of tos) edges.push({ from: f, to: t, label, style });
+        leftTok = right;
       }
     } else {
       ensureNode(line);

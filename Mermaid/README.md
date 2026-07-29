@@ -97,11 +97,24 @@ existían (por su id) y los nuevos se colocan cerca de sus vecinos. Si el texto
 tiene un error de sintaxis, el lienzo se queda como estaba y aparece un aviso
 rojo hasta que lo corrijas.
 
-El parser cubre el subconjunto de `flowchart` que genera el editor: las 8
-formas, las 4 flechas (con etiqueta `|"..."|`), cadenas `A --> B --> C` y líneas
-`style`. Puedes pegar un diagrama de flujo escrito a mano y, si usa esas
-construcciones, se dibujará; construcciones de Mermaid fuera de ese subconjunto
-darán error.
+El parser entiende el `flowchart` habitual, no solo lo que genera el editor:
+
+- Las 8 formas y las 4 flechas.
+- Etiqueta de flecha en las dos notaciones: con tubería `-->|"texto"|` **y en
+  línea** `-- texto -->`, `-. texto .->`, `== texto ==>`.
+- Multidestino con `&`: `A --> B & C` (y `A & B --> C`) se expanden a varias
+  flechas.
+- Cadenas `A --> B --> C`.
+- **Subgráficos** (`subgraph ... end`): se *aplanan* — se conservan sus nodos y
+  flechas, pero la caja del grupo no se dibuja en el lienzo (sí aparece en la
+  *Vista previa*, que usa el Mermaid real).
+- Líneas `style` (color de nodo) y entidades HTML en las etiquetas
+  (`&lt;`, `&gt;`, `<br/>`).
+
+Puedes pegar directamente el `flowchart` que te genere Claude u otra IA. Lo que
+quede fuera de este subconjunto (otros tipos de diagrama, sintaxis exótica) dará
+un aviso en el lienzo, pero la **Vista previa lo renderiza igual** porque usa el
+motor completo de Mermaid.
 
 ---
 
@@ -121,6 +134,12 @@ darán error.
 **El navegador dice que el archivo no es seguro / no carga el código.** Ábrelo
 con un navegador moderno (Edge, Chrome, Firefox). El acceso directo ya usa el
 predeterminado del sistema.
+
+**Pegué un diagrama y el lienzo da error, pero quiero verlo.** Cambia a la
+pestaña *Vista previa*: usa el motor completo de Mermaid y renderiza cualquier
+`flowchart` válido (y otros tipos de diagrama), aunque el lienzo editable no
+sepa reconstruirlo. El aviso rojo solo afecta a la reconstrucción gráfica, no a
+la vista previa.
 
 **No aparece la vista previa.** Cambia a la pestaña *Vista previa*; si el código
 tiene algún carácter que Mermaid rechaza, se muestra el error en rojo en vez de

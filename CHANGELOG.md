@@ -8,6 +8,31 @@ herramienta** (cada carpeta lleva su propia versión).
 
 ---
 
+## [Mermaid 1.2.0] - 2026-07-29
+
+El parser código→lienzo pasa de entender solo lo que genera el editor a digerir
+el `flowchart` habitual que produce una IA.
+
+### Añadido
+
+- **Subgráficos** (`subgraph ... end`): se aplanan (se conservan nodos y
+  flechas; la caja no se dibuja en el lienzo, pero sí en la Vista previa).
+- **Multidestino con `&`**: `A --> B & C` y `A & B --> C` se expanden a varias
+  flechas (producto cartesiano de los extremos).
+- **Etiqueta de flecha en línea**: `-- texto -->`, `-. texto .->` y
+  `== texto ==>` se normalizan a la forma con tubería antes de parsear.
+- Decodificación de entidades HTML en las etiquetas (`&lt;`, `&gt;`, `&amp;`,
+  `&quot;`).
+
+### Notas
+
+- Motivación: al pegar un diagrama generado por Claude, la *Vista previa* (motor
+  real de Mermaid) ya lo renderizaba, pero el lienzo editable fallaba con estas
+  construcciones. Ahora las reconstruye. Lo que quede fuera del subconjunto sigue
+  avisando en el lienzo sin afectar a la Vista previa.
+
+---
+
 ## [Mermaid 1.1.0] - 2026-07-29
 
 Edición del código en los dos sentidos.

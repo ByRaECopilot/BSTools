@@ -16,7 +16,7 @@ Para construir una herramienta nueva, ver [SPEC.md](SPEC.md).
 | [PDF2MD](PDF2MD/) | 1.0.0 | Estable | Probado de punta a punta. En uso. |
 | [Limpiar Temporales](Limpiar%20Temporales/) | 2.0.0 | Estable | Tarea de arranque silenciosa, sin confirmación. Probado. |
 | [BrandAssets](BrandAssets/) | 1.0.0 | Estable | Iconos de PWA desde un PNG 1024. Probado de punta a punta. |
-| [Mermaid](Mermaid/) | 1.1.0 | Estable | Editor grafico de diagramas de flujo, cliente puro. Edicion de codigo bidireccional. Probado de punta a punta. |
+| [Mermaid](Mermaid/) | 1.2.0 | Estable | Editor grafico de diagramas de flujo, cliente puro. Edicion bidireccional; el parser digiere el flowchart tipico de una IA. Probado de punta a punta. |
 
 ---
 
@@ -137,9 +137,12 @@ pixel a pixel (mismo font/padding/line-height, scroll sincronizado).
 - **Lienzo SVG propio** para la edicion (arrastrar/conectar), y Mermaid solo para
   la vista previa y el export. Separar ambos evita depender del render de Mermaid
   para la interaccion, que debe ser instantanea.
-- **El parser cubre solo lo que el editor genera** (`flowchart` con las 8 formas,
-  4 flechas, cadenas y `style`), no Mermaid arbitrario. Es la ida y vuelta de
-  nuestro propio formato, no un parser general de Mermaid.
+- **El parser digiere el `flowchart` habitual** (v1.2.0): ademas de lo que genera
+  el editor, entiende subgraphs (aplanados), multidestino `&`, etiqueta de flecha
+  en linea (`-. txt .->`) y entidades HTML. Motivo: la Vista previa (Mermaid real)
+  ya renderizaba el codigo pegado de una IA, pero el lienzo fallaba; ahora lo
+  reconstruye. Sigue sin ser un parser general de Mermaid: otros tipos de diagrama
+  avisan en el lienzo (pero la Vista previa los pinta igual).
 - **Libreria empaquetada** (`vendor/mermaid.min.js`, ~3,5 MB) en vez de CDN: fiel
   a la filosofia del repo (sin dependencias de red en runtime, funciona offline).
 
