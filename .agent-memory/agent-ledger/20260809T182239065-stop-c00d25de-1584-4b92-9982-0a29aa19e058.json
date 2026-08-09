@@ -1,0 +1,8 @@
+{
+  "schema": "agent-run/1",
+  "event": "stop",
+  "sessionId": "c00d25de-1584-4b92-9982-0a29aa19e058",
+  "endedAt": "2026-08-09T18:22:39.034Z",
+  "result": "unknown",
+  "atCommit": "ae2c45c"
+}

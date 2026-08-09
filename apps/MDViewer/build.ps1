@@ -47,6 +47,11 @@ if (-not (Test-Path $viewerHtml)) {
     throw "No se encuentra $viewerHtml. Es el contrato con el HTML del visor (window.MDV.render); sin el, MDViewer no puede arrancar."
 }
 
+$iconFile = Join-Path $toolDir 'MDViewer.ico'
+if (-not (Test-Path $iconFile)) {
+    throw "No se encuentra $iconFile. Es el icono de marca (exe, ventana y asociacion .md)."
+}
+
 $outExe = Join-Path $toolDir 'MDViewer.exe'
 
 $refs = @(
@@ -65,8 +70,10 @@ $cscArgs = @(
     '/optimize+'
     '/codepage:65001'
     "/out:$outExe"
+    "/win32icon:$iconFile"
     "/reference:$refs"
     "/resource:$viewerHtml,MDViewer.Viewer.html"
+    "/resource:$iconFile,MDViewer.Icon.ico"
     $source
 )
 

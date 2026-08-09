@@ -24,6 +24,7 @@ using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -242,6 +243,7 @@ namespace BSTools.MDViewer
     internal sealed class ViewerForm : Form
     {
         private const string ViewerResourceName = "MDViewer.Viewer.html";
+        private const string IconResourceName = "MDViewer.Icon.ico";
 
         private readonly WebView2 _webView;
         private readonly MenuStrip _menu;
@@ -259,6 +261,12 @@ namespace BSTools.MDViewer
             Width = 960;
             Height = 720;
             StartPosition = FormStartPosition.CenterScreen;
+
+            Icon windowIcon = LoadEmbeddedIcon();
+            if (windowIcon != null)
+            {
+                Icon = windowIcon;
+            }
 
             // Orden de alta importante para el docking: primero el control
             // que rellena (Fill), despues los que se anclan a un borde
@@ -646,6 +654,37 @@ namespace BSTools.MDViewer
         }
 
         /// <summary>
+        /// Carga el icono de marca embebido como recurso administrado (igual
+        /// que assets\viewer.html) para usarlo en la barra de titulo y en la
+        /// barra de tareas. Se pide un tamano concreto (32x32) en vez de
+        /// dejar que System.Drawing.Icon elija: esa API interpreta mal la
+        /// entrada PNG de 256 px del .ico (pide 256 y devuelve 128), y
+        /// Icon.ExtractAssociatedIcon tiene el mismo problema por otra via
+        /// (solo trae un tamano pequeno). Si el recurso no aparece, se deja
+        /// el icono por defecto de WinForms: esto es cosmetico, no debe
+        /// tumbar el visor.
+        /// </summary>
+        private static Icon LoadEmbeddedIcon()
+        {
+            try
+            {
+                Assembly assembly = Assembly.GetExecutingAssembly();
+                using (Stream stream = assembly.GetManifestResourceStream(IconResourceName))
+                {
+                    if (stream == null)
+                    {
+                        return null;
+                    }
+                    return new Icon(stream, 32, 32);
+                }
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Codifica una cadena .NET como literal de cadena JS/JSON, sin
         /// depender de ninguna libreria (no hay NuGet en este proyecto).
         /// </summary>
@@ -716,6 +755,12 @@ namespace BSTools.MDViewer
         private const string SettingsSubKey = "Software\\BSTools\\MDViewer";
         private const string AskedValueName = "AskedAssociation";
 
+        private const uint ShcneAssocchanged = 0x08000000;
+        private const uint ShcnfIdlist = 0x0000;
+
+        [DllImport("shell32.dll")]
+        private static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
         private static bool _askedThisProcess;
 
         public static void MaybeOfferAssociation(IWin32Window owner)
@@ -771,6 +816,14 @@ namespace BSTools.MDViewer
                 {
                     shellKey.SetValue(string.Empty, command);
                 }
+                // Apunta al .exe (no al .ico): la asociacion queda
+                // autocontenida, si alguien borra MDViewer.ico los .md no
+                // se quedan sin icono (el exe lleva su icono embebido via
+                // /win32icon en build.ps1).
+                using (RegistryKey iconKey = progIdKey.CreateSubKey("DefaultIcon"))
+                {
+                    iconKey.SetValue(string.Empty, "\"" + exePath + "\",0");
+                }
             }
 
             using (RegistryKey openWithKey = Registry.CurrentUser.CreateSubKey(
@@ -797,6 +850,8 @@ namespace BSTools.MDViewer
                     extKey.SetValue(string.Empty, ProgId);
                 }
             }
+
+            NotifyShellAssociationChanged();
         }
 
         public static void Disassociate()
@@ -824,6 +879,18 @@ namespace BSTools.MDViewer
                     }
                 }
             }
+
+            NotifyShellAssociationChanged();
+        }
+
+        /// <summary>
+        /// Avisa al Explorador de que cambio una asociacion de archivos
+        /// (icono incluido) para que lo refresque de inmediato, sin esperar
+        /// a que reinicie por su cuenta ni a un logoff.
+        /// </summary>
+        private static void NotifyShellAssociationChanged()
+        {
+            SHChangeNotify(ShcneAssocchanged, ShcnfIdlist, IntPtr.Zero, IntPtr.Zero);
         }
 
         private static void SafeDeleteTree(string path)

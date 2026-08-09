@@ -68,6 +68,7 @@ cerrar la ventana.
 ```
 MDViewer/
 ├── MDViewer.exe                          la aplicación (~90 KB)
+├── MDViewer.ico                          icono de marca (exe, ventana y asociación .md)
 ├── Microsoft.Web.WebView2.Core.dll       \
 ├── Microsoft.Web.WebView2.WinForms.dll    |  motor de render (WebView2)
 ├── WebView2Loader.dll                    /
@@ -80,6 +81,10 @@ MDViewer/
 
 Todo funciona **sin internet**. No hay servicios en segundo plano ni nada que
 quede corriendo cuando cierras la ventana.
+
+Los `.md` que asocies con MDViewer muestran el icono de la app en el
+Explorador (la asociación apunta al `.exe`, así que sigue funcionando aunque
+borres `MDViewer.ico`).
 
 ### Recompilar
 
