@@ -3,9 +3,10 @@
 > Redistribuido desde `SPEC.md` §3 ("Los cuatro patrones de arranque"), §4 ("Contrato con Windows")
 > y §9 ("Trampas del entorno"). Texto literal del dueño, sin reescribir.
 
-## Los cuatro patrones de arranque
+## Los cinco patrones de arranque
 
-Elige uno antes de escribir nada. Determina qué hace `install.ps1`.
+Elige uno antes de escribir nada. Determina qué hace `install.ps1` — o si hace
+falta tenerlo.
 
 | Patrón | Cuándo | Referencia |
 |---|---|---|
@@ -13,6 +14,7 @@ Elige uno antes de escribir nada. Determina qué hace `install.ps1`.
 | **Tarea programada** | Se ejecuta sola, sin que el usuario la invoque | Limpiar Temporales |
 | **Interfaz web local** | Hace falta un formulario o UI **y** el servidor toca el disco / procesa | BrandAssets, Mermaid |
 | **Cliente puro** | UI visual que se resuelve entera en el navegador, sin tocar el disco desde el servidor | (sin ejemplo actual) |
+| **Ejecutable autorregistrado** | La herramienta **es** una aplicación con ventana propia y se asocia a una extensión | MDViewer |
 
 Se pueden combinar: BrandAssets tiene interfaz web **y** entrada de menú
 contextual en los `.png` que la abre con la imagen ya cargada; Mermaid tiene
@@ -33,6 +35,28 @@ pero en cuanto pidas *guardar en una carpeta del proyecto* topas con que
 Si intuyes que la herramienta acabará guardando/cargando archivos, arranca ya con
 servidor local: migrar de cliente puro a servidor a mitad de camino cuesta más
 que empezar bien. Mermaid nació cliente puro y tuvo que migrar en la v1.3.0.
+
+**Ejecutable autorregistrado (MDViewer, 2026-08-09).** Cuando la herramienta es
+una aplicación de escritorio que el usuario abre a diario con doble clic, el
+`install.ps1` sobra: el propio `.exe` pregunta en su primer arranque si quiere
+asociarse a la extensión, escribe su ProgID en `HKCU:\Software\Classes` y ofrece
+desasociarse desde su propio menú. Mismo contrato con el registro que el resto de
+patrones — la diferencia es **quién** lo ejecuta, no qué se escribe. Reglas
+propias de este patrón:
+
+- Se compila con el `csc.exe` de .NET Framework que **ya trae Windows**
+  (`C:\Windows\Microsoft.NET\Framework64\v4.0.30319\`). No se instala el .NET SDK:
+  no aporta velocidad y son gigabytes. Limita el código a **C# 5** (sin `$"..."`
+  ni *pattern matching*).
+- El `.exe` compilado y sus DLL **se versionan en el repo**, para que la carpeta
+  siga siendo copiable y funcione sin compilar. El `build.ps1` es herramienta de
+  desarrollo, no de instalación.
+- El código fuente se queda al lado, legible: sigue mandando "el usuario tiene
+  que poder abrir el archivo y entenderlo".
+- Windows protege la app por defecto de una extensión con un hash (`UserChoice`).
+  Si ya había otra elegida, la asociación no se puede imponer en silencio — se
+  documenta en el README y se deja que el usuario la fije una vez a mano. **No se
+  falsifica ese hash.**
 
 Lo que **no** hacemos: instaladores binarios, servicios en segundo plano,
 entradas en el arranque que no sean una tarea programada visible, ni

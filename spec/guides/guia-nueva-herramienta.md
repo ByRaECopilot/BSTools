@@ -14,7 +14,7 @@ ahí la reporta el linter de layout como fuera de sitio.
 
 ```
 apps/NombreHerramienta/
-├── install.ps1            obligatorio si hay algo que registrar o instalar
+├── install.ps1            obligatorio si hay que registrar algo Y no lo hace la propia app
 ├── uninstall.ps1          obligatorio si existe install.ps1 — revierte TODO
 ├── NombreHerramienta.cmd  lanzador: puente entre Windows y el script
 ├── script.py              la lógica (o .bat/.ps1 si no hace falta Python)
@@ -22,6 +22,15 @@ apps/NombreHerramienta/
 ├── .gitignore             solo si el uso genera archivos locales
 └── README.md              obligatorio siempre
 ```
+
+**Excepción: el ejecutable autorregistrado.** Si la herramienta es una aplicación
+con ventana propia (patrón añadido en
+[`tech-stack.md`](../constitution/tech-stack.md) con MDViewer), **no lleva
+`install.ps1` ni `uninstall.ps1` ni lanzador `.cmd`**: el propio `.exe` pregunta
+en su primer arranque si asociarse a la extensión y ofrece revertirlo desde su
+menú. En su lugar lleva `build.ps1` (recompilar, solo desarrollo), `src/` con el
+fuente y el `.exe` compilado versionado. El `README.md` sigue siendo obligatorio,
+y el contrato con el registro no cambia.
 
 **Nombres.** El lanzador se llama `<NombreHerramienta>.cmd` (así el acceso
 directo y el icono del Explorador se leen solos). Las herramientas anteriores a
