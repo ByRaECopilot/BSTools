@@ -4,7 +4,7 @@ Vacía las carpetas temporales de Windows **automáticamente al iniciar sesión*
 en silencio y sin preguntar. Útil cuando una herramienta —o un asistente como
 Claude— deja miles de archivos temporales acumulados.
 
-Parte de [BSTools](../README.md) · [www.byraesoftware.com](https://www.byraesoftware.com) · Licencia [CC0](../LICENSE)
+Parte de [BSTools](../../README.md) · [www.byraesoftware.com](https://www.byraesoftware.com) · Licencia [CC0](../../LICENSE)
 
 ---
 

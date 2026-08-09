@@ -1,0 +1,9 @@
+{
+  "schema": "agent-run/1",
+  "event": "start",
+  "sessionId": "c00d25de-1584-4b92-9982-0a29aa19e058",
+  "agent": "pixel-ui-ux-designer",
+  "label": null,
+  "startedAt": "2026-08-09T14:31:43.291Z",
+  "atCommit": "ab4227b"
+}

@@ -2,12 +2,15 @@
 
 Instrucciones para Claude Code al trabajar en este repositorio.
 
-- **Para crear o modificar una herramienta: [SPEC.md](SPEC.md).** Lleva la
-  especificación completa y las plantillas copiables de `install.ps1`,
+- **Para crear o modificar una herramienta: [spec/guides/guia-nueva-herramienta.md](spec/guides/guia-nueva-herramienta.md).**
+  Lleva la estructura de carpeta y las plantillas copiables de `install.ps1`,
   `uninstall.ps1` y el lanzador. **No hace falta abrir otra herramienta para
-  copiar su estructura**; si SPEC.md se queda corto en algo, arréglalo ahí.
-- **Para saber en qué punto está el trabajo: [STATUS.md](STATUS.md).**
-- **Para registrar cambios, hazlo en [CHANGELOG.md](CHANGELOG.md).**
+  copiar su estructura**; si la guía se queda corta en algo, arréglala ahí.
+- **Para saber en qué punto está el trabajo:** qué falta en
+  [spec/backlog/backlog.md](spec/backlog/backlog.md); dónde se cortó la última sesión, en
+  `spec/sessions/` (si existe un handoff).
+- **Para registrar cambios: el propio mensaje del commit** (versión + qué cambió, p.ej.
+  `Mermaid 1.3.0: guardar/cargar en graphs/`) — no hay un archivo de changelog aparte.
 
 ## El proyecto
 
@@ -22,8 +25,10 @@ Licencia CC0 1.0 (dominio público) — todo lo que se añada va bajo CC0.
 ## Lo imprescindible
 
 Cada herramienta es una carpeta **autocontenida**: alguien debe poder copiar solo
-esa carpeta y que funcione. La estructura, los cuatro patrones de arranque, el
-contrato con el registro de Windows y las plantillas están en [SPEC.md](SPEC.md).
+esa carpeta y que funcione. La estructura y los cuatro patrones de arranque están en
+[spec/constitution/tech-stack.md](spec/constitution/tech-stack.md), junto con el
+contrato con el registro de Windows; las plantillas de `install.ps1`, `uninstall.ps1`
+y el lanzador están en [spec/guides/guia-nueva-herramienta.md](spec/guides/guia-nueva-herramienta.md).
 
 Cuatro reglas que no se negocian:
 
@@ -36,7 +41,8 @@ Cuatro reglas que no se negocian:
   registro verificado. La entrada de prueba se genera sintéticamente.
 
 Al terminar una herramienta, la lista de documentos que hay que actualizar está
-al final de [SPEC.md](SPEC.md).
+en el checklist de cierre de
+[spec/constitution/principles.md](spec/constitution/principles.md).
 
 ## Trampas del entorno
 

@@ -122,4 +122,4 @@ absolutas: vuelve a ejecutar `install.ps1`.
 
 ---
 
-Parte de [BSTools](../README.md) · [www.byraesoftware.com](https://www.byraesoftware.com) · CC0 1.0
+Parte de [BSTools](../../README.md) · [www.byraesoftware.com](https://www.byraesoftware.com) · CC0 1.0

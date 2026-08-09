@@ -5,7 +5,7 @@ Windows. El Markdown resultante está pensado para dárselo a un LLM (Claude,
 ChatGPT, etc.): estructura limpia, tablas reales y sin la basura que suelen
 arrastrar los extractores de PDF.
 
-Parte de [BSTools](../README.md) · [www.byraesoftware.com](https://www.byraesoftware.com) · Licencia [CC0](../LICENSE)
+Parte de [BSTools](../../README.md) · [www.byraesoftware.com](https://www.byraesoftware.com) · Licencia [CC0](../../LICENSE)
 
 ---
 
@@ -109,6 +109,11 @@ Usa [PyMuPDF4LLM](https://pymupdf.readthedocs.io/en/latest/pymupdf4llm/), la
 extracción de PyMuPDF diseñada específicamente para alimentar LLMs y pipelines
 RAG. Es rápida (segundos, no minutos), local, y no descarga modelos de varios
 gigabytes.
+
+**Decisión de diseño:** se descartó [Marker](https://github.com/VikParuchuri/marker)
+como motor pese a dar mejor resultado en PDFs complejos, porque descarga unos
+2 GB de modelos y es lento sin GPU. `pymupdf4llm` convierte en segundos y no
+descarga nada.
 
 **Limitación conocida:** un PDF escaneado (solo imágenes, sin capa de texto) no
 tiene texto que extraer. PDF2MD lo detecta y avisa en lugar de generar un `.md`
