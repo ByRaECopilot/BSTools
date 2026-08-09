@@ -8,7 +8,8 @@
 
     No hay .NET SDK instalado: se usa el compilador de .NET Framework
     (csc.exe) que trae Windows. Embebe assets\viewer.html como recurso del
-    ejecutable y enlaza las DLL de WebView2 que viven en lib\.
+    ejecutable y enlaza las DLL de WebView2 que viven junto al exe (tienen que
+    estar ahi de todos modos para que el runtime las encuentre al arrancar).
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\build.ps1
@@ -35,10 +36,9 @@ if (-not (Test-Path $source)) {
     throw "No se encuentra $source"
 }
 
-$libDir = Join-Path $toolDir 'lib'
 foreach ($dll in 'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll') {
-    if (-not (Test-Path (Join-Path $libDir $dll))) {
-        throw "Falta $dll en $libDir"
+    if (-not (Test-Path (Join-Path $toolDir $dll))) {
+        throw "Falta $dll en $toolDir"
     }
 }
 
@@ -59,8 +59,8 @@ $refs = @(
     'System.Core.dll'
     'System.Drawing.dll'
     'System.Windows.Forms.dll'
-    (Join-Path $libDir 'Microsoft.Web.WebView2.Core.dll')
-    (Join-Path $libDir 'Microsoft.Web.WebView2.WinForms.dll')
+    (Join-Path $toolDir 'Microsoft.Web.WebView2.Core.dll')
+    (Join-Path $toolDir 'Microsoft.Web.WebView2.WinForms.dll')
 ) -join ','
 
 $cscArgs = @(
@@ -85,15 +85,6 @@ if ($rc -ne 0) {
     throw "La compilacion fallo (codigo $rc)."
 }
 
-# Las DLL de lib\ solo se usaron como referencia de compilacion: en tiempo
-# de ejecucion el CLR busca los ensamblados en la carpeta del exe, no en
-# lib\. Hay que copiar las tres junto al exe (las dos administradas y el
-# cargador nativo WebView2Loader.dll) o el arranque falla con
-# FileNotFoundException al construir la primera ventana.
-foreach ($dll in 'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll') {
-    Copy-Item -Path (Join-Path $libDir $dll) -Destination $toolDir -Force
-}
-
 Write-Host ''
 Write-Host "Compilado: $outExe" -ForegroundColor Green
-Write-Host '  Copiadas junto al exe: Microsoft.Web.WebView2.Core.dll, Microsoft.Web.WebView2.WinForms.dll, WebView2Loader.dll' -ForegroundColor DarkGray
+Write-Host '  DLL de WebView2 ya estaban junto al exe (misma carpeta usada para compilar y ejecutar): no hace falta copiarlas.' -ForegroundColor DarkGray

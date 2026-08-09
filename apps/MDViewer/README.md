@@ -70,8 +70,8 @@ MDViewer/
 ├── MDViewer.exe                          la aplicación (~90 KB)
 ├── MDViewer.ico                          icono de marca (exe, ventana y asociación .md)
 ├── Microsoft.Web.WebView2.Core.dll       \
-├── Microsoft.Web.WebView2.WinForms.dll    |  motor de render (WebView2)
-├── WebView2Loader.dll                    /
+├── Microsoft.Web.WebView2.WinForms.dll    |  motor de render (WebView2): junto al exe
+├── WebView2Loader.dll                    /   porque ahí las necesita el runtime al arrancar
 ├── build.ps1                             recompila el .exe (solo desarrollo)
 ├── src/MDViewer.cs                       código fuente, un solo archivo
 └── assets/
