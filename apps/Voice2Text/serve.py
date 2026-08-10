@@ -182,6 +182,10 @@ class Handler(BaseHTTPRequestHandler):
     def _job_manager(self) -> jobs.JobManager:
         return self.server.job_manager  # type: ignore[attr-defined]
 
+    @property
+    def _settings(self) -> dict:
+        return self.server.settings  # type: ignore[attr-defined]
+
     def _authorized(self) -> bool:
         header = self.headers.get("X-Token", "")
         if not header:
@@ -383,8 +387,18 @@ class Handler(BaseHTTPRequestHandler):
         source = body.get("source")
         options = body.get("options") or {}
         if not isinstance(source, dict):
-            self._bad_request("falta 'source' (objeto: {'kind': 'file', 'path': ...})")
+            self._bad_request(
+                "falta 'source' (objeto: {'kind': 'file', 'path': ...} o {'kind': 'url', 'url': ...})"
+            )
             return
+
+        if source.get("kind") == "url":
+            # D26: player_clients SIEMPRE sale de settings.json, nunca lo escribe
+            # quien llama -- un bot no tiene por que conocer este detalle de
+            # yt-dlp. Si el cliente ya lo trae explicito en `options`, se respeta.
+            options = dict(options)
+            options.setdefault("player_clients", self._settings.get("youtube_player_clients"))
+            options.setdefault("max_input_bytes", self._settings.get("max_input_bytes"))
 
         try:
             job_id, position = self._job_manager.submit_transcription(source, options)
@@ -587,6 +601,7 @@ def main(argv: list[str] | None = None) -> int:
 
     httpd.job_manager = job_manager  # type: ignore[attr-defined]
     httpd.token = token  # type: ignore[attr-defined]
+    httpd.settings = resolved_settings  # type: ignore[attr-defined]
 
     job_manager.start()
     _print_banner(port, TOKEN_PATH, resolved_settings["model_idle_timeout_seconds"])

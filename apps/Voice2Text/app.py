@@ -18,15 +18,13 @@ Unica capa que sabe de `webview`, de Windows y de castellano (junto con
     archivo YA hace directamente sin pasar por `jobs.py`: encolar/orquestar es
     lo unico que le corresponde en exclusiva a `jobs.py` (ARCHITECTURE.md Sec.2).
 
-Brecha declarada y NO resuelta aqui (ver `messages.LINK_TRANSCRIPTION_UNAVAILABLE`
-para el detalle completo): `jobs.py` todavia rechaza cualquier origen que no sea
-un archivo local (`source.kind != "file"` -> CoreError(UNSUPPORTED_URL), ver su
-propio docstring). Arreglarlo exige tocar `jobs.py`, que este lote tiene
-prohibido. `probe_url()` SI funciona (llamada de solo lectura a `fetch.probe()`,
-igual que `serve.py._health()` llama a `fetch.ytdlp_version()` directamente) pero
-`start_transcription()` con un origen de enlace se rechaza con un mensaje honesto
-en vez de fingir que funciona o de reusar el codigo `unsupported_url` (que
-significaria algo distinto: "ese sitio no se puede descargar").
+`start_transcription()` acepta un origen `file` o `url` por igual: `jobs.py` es
+quien encola y orquesta la descarga (fase `fetching`) antes de transcribir, esta
+cascara no reimplementa nada de eso. `ui.html` es quien compone `options` para
+un origen de enlace -- incluidos `player_clients` y `max_input_bytes`, leidos de
+`App.ctx.settings` (que ya trae TODAS las claves de `settings.py`, ADR-0001
+D26) -- exactamente igual que ya hace hoy con `device_preference`/`vad_filter`
+para un archivo local: esta cascara Python no necesita inyectar nada aparte.
 """
 from __future__ import annotations
 
@@ -182,7 +180,6 @@ class Api:
             "language_confidence_warning": messages.LANGUAGE_CONFIDENCE_WARNING,
             "inline_unsupported_scheme": messages.INLINE_UNSUPPORTED_SCHEME,
             "drag_drop_multiple_files": messages.DRAG_DROP_MULTIPLE_FILES,
-            "link_transcription_unavailable": dict(messages.LINK_TRANSCRIPTION_UNAVAILABLE),
         }
 
     def _catalog_cards(self, caps: "transcribe.DeviceCapabilities") -> list[dict[str, Any]]:
@@ -317,15 +314,6 @@ class Api:
 
     @_safe
     def start_transcription(self, source: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
-        if source.get("kind") != "file":
-            # Brecha declarada (ver docstring del modulo y messages.py): jobs.py
-            # solo acepta origenes de archivo hoy. No se reimplementa aqui la
-            # orquestacion "descargar + transcribir" -- eso duplicaria jobs.py.
-            raise CoreError(
-                ErrorCode.INTERNAL,
-                details={"reason": "link_transcription_unavailable"},
-                technical="source.kind=url: jobs.submit_transcription solo acepta 'file' (pendiente lote 4)",
-            )
         job_id, position = self._jobs.submit_transcription(source, options)
         return {"job_id": job_id, "queue_position": position}
 

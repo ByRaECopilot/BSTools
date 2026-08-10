@@ -43,6 +43,7 @@ from typing import Any, Callable, Optional
 import av
 
 import export
+import fetch
 import models
 import transcribe
 from errors import CoreError, ErrorCode, one_line
@@ -50,9 +51,11 @@ from errors import CoreError, ErrorCode, one_line
 logger = logging.getLogger(__name__)
 
 # Fases dentro de state="running" (ARCHITECTURE.md Sec.4.3, mas "detecting_language"
-# -- anadida el 2026-08-10, ver docstring de _run_transcription). "probing" y
-# "fetching" son de origen enlace (lote 4, fetch.py): se dejan en la lista para que
-# el estado tenga un vocabulario cerrado desde ya, aunque este lote no las produzca.
+# -- anadida el 2026-08-10, ver docstring de _run_transcription). "fetching" la
+# produce _resolve_media_path() para un origen de enlace, ANTES de tocar el modelo.
+# "probing" se deja en la lista solo como vocabulario cerrado: consultar
+# titulo/duracion sin descargar es una llamada sincrona a `fetch.probe()` que hace
+# la cascara directamente (p.ej. `Api.probe_url` en app.py), nunca pasa por esta cola.
 PHASE_QUEUED = "queued"
 PHASE_PROBING = "probing"
 PHASE_FETCHING = "fetching"
@@ -136,6 +139,13 @@ def _purge_job_work_files(work_dir: Path, job_id: str) -> None:
             continue
 
 
+# Red de seguridad si la cascara omite la clave -- NO es una politica nueva ni un
+# valor que este archivo decida: es el mismo por defecto que ya trae settings.py
+# (D13 sigue intacto, la cascara resuelve settings.json y jobs.py solo evita un
+# `None` si alguien olvida pasarlo).
+_DEFAULT_MAX_INPUT_BYTES = 2147483648  # 2 GiB
+
+
 def _normalize_options(raw: dict[str, Any]) -> dict[str, Any]:
     if not raw.get("model_id"):
         raise ValueError("options.model_id es obligatorio")
@@ -146,6 +156,10 @@ def _normalize_options(raw: dict[str, Any]) -> dict[str, Any]:
         "vad_filter": raw.get("vad_filter", True),
         "output_dir": raw.get("output_dir"),
         "formats": list(raw.get("formats") or _DEFAULT_FORMATS),
+        # Solo hacen falta para un origen de enlace (ver `submit_transcription`),
+        # pero se normalizan siempre para que `Job.options` tenga una forma unica.
+        "player_clients": list(raw.get("player_clients") or []),
+        "max_input_bytes": raw.get("max_input_bytes") or _DEFAULT_MAX_INPUT_BYTES,
     }
 
 
@@ -349,37 +363,72 @@ class JobManager:
     # ------------------------------------------------------------------ encolar
 
     def submit_transcription(self, source: dict[str, Any], options: dict[str, Any]) -> tuple[str, int]:
-        """`source = {"kind": "file", "path": "..."}`. `"kind": "url"` no esta
-        disponible hasta el lote 4 (`fetch.py`): se rechaza aqui mismo, no a medias.
-        Devuelve `(job_id, queue_position)`.
+        """`source = {"kind": "file", "path": "..."}` o `{"kind": "url", "url": "..."}`.
+
+        Validacion barata y SINCRONA antes de encolar (ARCHITECTURE.md Sec.3): un
+        archivo que no existe, un esquema que no es http/https, o un origen sin
+        `player_clients` fallan aqui mismo -- nunca tras minutos de descarga o
+        transcripcion. Devuelve `(job_id, queue_position)`.
         """
-        if source.get("kind") != "file":
+        kind = source.get("kind")
+        if kind not in ("file", "url"):
             raise CoreError(
                 ErrorCode.UNSUPPORTED_URL,
-                details={"kind": source.get("kind")},
-                technical="url source not available before lote 4 (fetch.py)",
+                details={"kind": kind},
+                technical="source.kind debe ser 'file' o 'url'",
             )
 
-        media_path = Path(source["path"]).resolve()
-        if not media_path.is_file():
-            raise CoreError(ErrorCode.FILE_NOT_FOUND, details={"path": str(media_path)}, technical="")
-
         normalized_options = _normalize_options(options)
+
+        if kind == "file":
+            media_path = Path(source["path"]).resolve()
+            if not media_path.is_file():
+                raise CoreError(ErrorCode.FILE_NOT_FOUND, details={"path": str(media_path)}, technical="")
+            if normalized_options["output_dir"] is None:
+                normalized_options["output_dir"] = str(media_path.parent)
+
+            job = Job(
+                job_id=_new_job_id(),
+                kind="transcription",
+                source={
+                    "kind": "file",
+                    "display_name": media_path.name,
+                    "path": str(media_path),
+                    "url": None,
+                    "has_video": None,
+                },
+                options=normalized_options,
+                media_duration_seconds=_probe_duration_seconds(media_path),
+            )
+            return self._enqueue(job)
+
+        # kind == "url"
+        url = source.get("url")
+        if not url or not isinstance(url, str):
+            raise ValueError("source.url es obligatorio (string) para un origen de enlace")
+        fetch.validate_url(url)  # solo esquema http/https -- barato (ARCHITECTURE.md Sec.3/11)
+        if not normalized_options["player_clients"]:
+            # D26: player_clients SIEMPRE lo inyecta la cascara desde settings.py,
+            # jobs.py nunca lo inventa. Sin el, yt-dlp usa su deteccion por
+            # defecto -- que el spike ya midio que falla sin cookies (Sec.3).
+            raise ValueError(
+                "options.player_clients es obligatorio para un origen de enlace (ADR-0001 D26)"
+            )
         if normalized_options["output_dir"] is None:
-            normalized_options["output_dir"] = str(media_path.parent)
+            # ARCHITECTURE.md Sec.7: "Destino por defecto:... para enlaces, salida/".
+            normalized_options["output_dir"] = str(self._tool_dir / "salida")
 
         job = Job(
             job_id=_new_job_id(),
             kind="transcription",
             source={
-                "kind": "file",
-                "display_name": media_path.name,
-                "path": str(media_path),
-                "url": None,
+                "kind": "url",
+                "display_name": url,  # se sustituye por el titulo real tras `fetching`
+                "path": None,
+                "url": url,
                 "has_video": None,
             },
             options=normalized_options,
-            media_duration_seconds=_probe_duration_seconds(media_path),
         )
         return self._enqueue(job)
 
@@ -596,13 +645,65 @@ class JobManager:
 
     # -- transcripcion -------------------------------------------------------
 
+    def _resolve_media_path(self, job: Job, should_cancel: Callable[[], bool]) -> Path:
+        """Ruta local lista para transcribir. Origen `file`: inmediata. Origen
+        `url`: dispara la fase `fetching` (ARCHITECTURE.md Sec.4.3) ANTES de
+        tocar el modelo -- si la descarga falla (`login_required`,
+        `geo_blocked`, red...) no se ha pagado el coste de cargar nada todavia.
+
+        `fetch.fetch_audio()` YA implementa cancelacion cooperativa real,
+        verificada contra la red (fetch.py, `_hook`): aqui solo se cablea el
+        callback de progreso y `should_cancel`, no se reimplementa nada.
+        """
+        if job.source["kind"] == "file":
+            return Path(job.source["path"])
+
+        if should_cancel():
+            raise CoreError(ErrorCode.CANCELLED, details={}, technical="")
+
+        self._set_phase(job, PHASE_FETCHING, progress=None)
+
+        def on_progress(downloaded: int, total: Optional[int]) -> None:
+            with self._lock:
+                job.phase = PHASE_FETCHING
+                job.downloaded_bytes = downloaded
+                job.total_bytes = total
+                job.progress = (downloaded / total) if total else None
+                job.updated_at = _now_iso()
+
+        fetched = fetch.fetch_audio(
+            job.source["url"],
+            self._work_dir,
+            job.job_id,
+            player_clients=job.options["player_clients"],
+            max_bytes=job.options["max_input_bytes"],
+            on_progress=on_progress,
+            should_cancel=should_cancel,
+        )
+
+        with self._lock:
+            # has_video=True es flujo NORMAL (ARCHITECTURE.md Sec.3): dato para
+            # que la cascara lo comente, nunca un error. display_name pasa de
+            # la URL cruda al titulo real -- es lo que ve el resto de la
+            # pantalla (y el nombre base de `.txt`/`.md`) desde aqui en adelante.
+            job.source["display_name"] = fetched.title
+            job.source["has_video"] = fetched.has_video
+            job.media_duration_seconds = fetched.duration_seconds
+            job.downloaded_bytes = None
+            job.total_bytes = None
+            job.progress = None
+            job.updated_at = _now_iso()
+
+        return fetched.path
+
     def _run_transcription(self, job: Job) -> None:
-        media_path = Path(job.source["path"])
         options = job.options
         model_id = options["model_id"]
 
         def should_cancel() -> bool:
             return job._cancel_event.is_set()
+
+        media_path = self._resolve_media_path(job, should_cancel)
 
         already_present = model_id in models.installed(self._models_dir)
         self._set_phase(job, PHASE_LOADING_MODEL if already_present else PHASE_DOWNLOADING_MODEL, progress=None)
@@ -662,9 +763,15 @@ class JobManager:
         self._update_speed_ratio_cache(model_id, device_choice.device, result)
 
         self._set_phase(job, PHASE_WRITING, progress=None)
+        # Para un origen de enlace, `display_name` ya es el titulo real (lo puso
+        # `_resolve_media_path` tras la descarga); `media_path.stem` seria el
+        # `job_id` del temporal, sin significado para quien lee el archivo
+        # (ARCHITECTURE.md Sec.7: "para enlaces, el titulo saneado"). El saneado
+        # en si lo hace `export.write_outputs()`, no aqui.
+        title = job.source["display_name"] if job.source["kind"] == "url" else media_path.stem
         meta = {
-            "title": media_path.stem,
-            "source": str(media_path),
+            "title": title,
+            "source": job.source.get("url") or str(media_path),
             "media_duration_seconds": result.media_duration_seconds,
             "language": result.language,
             "language_probability": result.language_probability,
@@ -677,7 +784,7 @@ class JobManager:
             result.segments,
             meta,
             Path(options["output_dir"]),
-            media_path.stem,
+            title,
             options["formats"],
         )
 

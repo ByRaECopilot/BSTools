@@ -6,9 +6,7 @@ archivo -- convierte esos codigos en las frases que ve el usuario. `app.py` impo
 estas funciones para enriquecer lo que expone a `ui.html`; `ui.html` nunca decide
 un texto de error por su cuenta, solo pinta lo que aqui se compuso.
 
-Todo el copy viene de `UI-SPEC.md` (Pixel, lote 3) trasladado literalmente, salvo
-donde se anota explicitamente lo contrario -- ver `LINK_TRANSCRIPTION_UNAVAILABLE`
-mas abajo, que es la unica pieza de texto que este archivo inventa, y por que.
+Todo el copy viene de `UI-SPEC.md` (Pixel, lote 3) trasladado literalmente.
 
 Convencion de la casa (igual que `export.py`): los COMENTARIOS y docstrings de
 este archivo van sin acentos; los VALORES de las cadenas -- lo que de verdad
@@ -263,37 +261,6 @@ def fallback_warning(fallback_reason: Optional[str]) -> Optional[dict[str, str]]
     }
 
 
-# --------------------------------------------------- brecha propia (NO en UI-SPEC)
-
-# jobs.py (lote 2) solo acepta `source.kind == "file"`: rechaza cualquier fuente
-# de enlace con CoreError(UNSUPPORTED_URL) de forma deliberada, en espera de que
-# el lote 4 conecte `fetch.py` dentro de `_run_transcription` (ver el comentario
-# de `submit_transcription` en jobs.py). `fetch.py` ya existe y `probe_url()` SI
-# funciona (llamada directa y sincrona a `fetch.probe()`, sin pasar por la cola:
-# es una lectura, no un trabajo -- mismo patron que usa `serve.py` para `/health`).
-# Pero ENCOLAR una transcripcion desde un enlace no tiene camino todavia: hacerlo
-# desde `app.py` exigiria reimplementar la orquestacion "descarga + transcribe"
-# que es, por diseno, responsabilidad exclusiva de `jobs.py` (ARCHITECTURE.md
-# Sec.2: duplicarla en la cascara es el acoplamiento que el diseno evita).
-#
-# UI-SPEC.md no preve este texto porque su autor no sabia que la integracion
-# quedaria a medias entre lotes -- las nueve operaciones de Sec.6.3 asumen que
-# "encolar" ya acepta un origen de enlace. Este es el UNICO mensaje de este
-# archivo que no viene de UI-SPEC.md palabra por palabra: se redacta aqui,
-# siguiendo su mismo tono, y se reporta como brecha para kronos-architect (el
-# arreglo es mecanico: una rama en `jobs.py._run_transcription` para
-# `source["kind"] == "url"` que llame a `fetch.fetch_audio()` durante una fase
-# `fetching` antes de `detecting_language` -- no se hace aqui porque el lote 3
-# tiene prohibido tocar `jobs.py`).
-LINK_TRANSCRIPTION_UNAVAILABLE = {
-    "title": "Transcribir directamente desde un enlace todavía no está conectado en esta versión.",
-    "body": (
-        "Puedes comprobar el enlace con «Examinar» para ver su título y duración, pero para "
-        "transcribirlo tienes que descargarlo tú mismo por ahora y arrastrar el archivo aquí."
-    ),
-}
-
-
 # ------------------------------------------------------- errores (Sec.5 + Sec.11)
 
 def _fmt_details_bytes(details: dict[str, Any], key: str) -> str:
@@ -450,21 +417,6 @@ def error_message(code: str, details: Optional[dict[str, Any]] = None) -> dict[s
     pantalla: titulo, pista, botones y donde se presenta (Sec.11).
     """
     details = details or {}
-
-    if code == "internal" and details.get("reason") == "link_transcription_unavailable":
-        # Ver LINK_TRANSCRIPTION_UNAVAILABLE mas arriba: la brecha propia de este
-        # lote. `ui.html` no deberia poder llegar aqui hoy (el boton "Transcribir"
-        # se queda deshabilitado para un origen de enlace), pero si algun camino
-        # futuro lo alcanza, el mensaje tiene que seguir siendo el honesto, no el
-        # generico de "internal".
-        return {
-            "code": code,
-            "title": LINK_TRANSCRIPTION_UNAVAILABLE["title"],
-            "hint": LINK_TRANSCRIPTION_UNAVAILABLE["body"],
-            "primary": ("Elegir un archivo", "choose_file"),
-            "secondary": None,
-            "surface": "card",
-        }
 
     template = _ERROR_TEMPLATES.get(code, _ERROR_TEMPLATES["internal"])
     title = template["title"]

@@ -120,8 +120,14 @@ def ytdlp_version() -> tuple[str, int]:
     return version, age_days
 
 
-def _validate_url(url: str) -> None:
-    """Solo `http`/`https` llegan a yt-dlp (ARCHITECTURE.md Sec.3)."""
+def validate_url(url: str) -> None:
+    """Solo `http`/`https` llegan a yt-dlp (ARCHITECTURE.md Sec.3).
+
+    Publica (sin guion bajo) porque `jobs.py` la llama tambien -- es la
+    validacion barata y SINCRONA que exige encolar (ARCHITECTURE.md Sec.3:
+    "validacion barata SINCRONA, trabajo ASINCRONO"): un esquema invalido
+    falla al encolar, no tras arrancar un trabajo.
+    """
     scheme = urlsplit(url).scheme.lower()
     if scheme not in _ALLOWED_SCHEMES:
         raise CoreError(
@@ -221,7 +227,7 @@ def _resolve_single_entry(info: Optional[dict]) -> dict:
 
 def probe(url: str, player_clients: list[str]) -> MediaInfo:
     """Titulo/duracion/extractor SIN descargar (fase `probing`, ARCHITECTURE.md Sec.4.3)."""
-    _validate_url(url)
+    validate_url(url)
     yt_dlp = _import_yt_dlp()
 
     opts = _base_ydl_opts(player_clients)
@@ -267,7 +273,7 @@ def fetch_audio(
     """Descarga (fase `fetching`). Nunca exige ni invoca postprocesadores (D2/D3): jamas
     fusiona streams, jamas requiere el binario `ffmpeg`.
     """
-    _validate_url(url)
+    validate_url(url)
     yt_dlp = _import_yt_dlp()
     from yt_dlp.utils import DownloadCancelled, DownloadError
 

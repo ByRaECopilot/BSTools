@@ -998,8 +998,6 @@ el('c-url-examine').addEventListener('click', async () => {
     const durationText = info.duration_seconds ? await fmtMmss(info.duration_seconds) : 'duración desconocida';
     el('c-url-preview').classList.remove('hidden');
     el('c-url-preview').innerHTML = `${iconSvg('link')}<span class="name">${escapeHtml(info.title)} · ${escapeHtml(durationText)} · ${escapeHtml(info.extractor)}</span>`;
-    el('c-url-unavailable').classList.remove('hidden');
-    el('c-url-unavailable').innerHTML = `${iconSvg('info')}<div class="body"><strong>${escapeHtml(App.ctx.copy.link_transcription_unavailable.title)}</strong><br>${escapeHtml(App.ctx.copy.link_transcription_unavailable.body)}</div>`;
   } catch (exc) {
     if (exc.apiError) {
       showErrorCard(exc.apiError.code, exc.apiError.details, exc.apiError.technical, { returnToC: true });
@@ -1014,7 +1012,7 @@ el('c-url-examine').addEventListener('click', async () => {
 el('c-url-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el('c-url-examine').click(); } });
 
 function updateTranscribeEnabled() {
-  const hasOrigin = !!App.fileSource;  // el origen de enlace no habilita Transcribir (brecha declarada)
+  const hasOrigin = !!App.fileSource || !!App.urlSource;
   const hasFormat = el('c-format-txt').checked || el('c-format-md').checked;
   el('c-transcribe').disabled = !(hasOrigin && hasFormat);
 }
@@ -1022,19 +1020,35 @@ el('c-format-txt').addEventListener('change', updateTranscribeEnabled);
 el('c-format-md').addEventListener('change', updateTranscribeEnabled);
 
 el('c-transcribe').addEventListener('click', async () => {
-  if (!App.fileSource) return;
+  if (!App.fileSource && !App.urlSource) return;
   const formats = [];
   if (el('c-format-txt').checked) formats.push('txt');
   if (el('c-format-md').checked) formats.push('md');
-  const source = { kind: 'file', path: App.fileSource.path };
-  const options = {
+  const baseOptions = {
     model_id: el('c-model-select').value,
     device_preference: App.ctx.settings.device_preference || 'auto',
     language: el('c-language-select').value || null,
     vad_filter: App.ctx.settings.vad_filter !== false,
-    output_dir: App.outputDirOverride || defaultOutputDirFor(App.fileSource),
     formats,
   };
+  let source, options;
+  if (App.fileSource) {
+    source = { kind: 'file', path: App.fileSource.path };
+    options = Object.assign({}, baseOptions, {
+      output_dir: App.outputDirOverride || defaultOutputDirFor(App.fileSource),
+    });
+  } else {
+    // Origen de enlace: jobs.py descarga en su fase `fetching` antes de
+    // transcribir (ARCHITECTURE.md Sec.3/4.3). `player_clients` y
+    // `max_input_bytes` vienen de `App.ctx.settings` (settings.py, ADR-0001
+    // D26) -- esta cascara nunca los inventa, solo los traslada.
+    source = { kind: 'url', url: App.urlSource.url };
+    options = Object.assign({}, baseOptions, {
+      output_dir: App.outputDirOverride || null,
+      player_clients: App.ctx.settings.youtube_player_clients || [],
+      max_input_bytes: App.ctx.settings.max_input_bytes,
+    });
+  }
   await beginTranscription(source, options);
 });
 
@@ -1049,7 +1063,7 @@ async function beginTranscription(source, options) {
     App.lastPhase = null;
     App.phaseStartedAt = Date.now();
     App.cancelling = false;
-    renderScreenDShell(source);
+    renderScreenDShell();
     showScreen('d');
     pollTranscription();
   } catch (exc) {
@@ -1062,12 +1076,20 @@ async function beginTranscription(source, options) {
 }
 
 /* ============================================================ Pantalla D: trabajando */
-const PHASE_ORDER = ['queued', 'loading_model', 'downloading_model', 'detecting_language', 'transcribing', 'writing'];
+const PHASE_ORDER = ['queued', 'fetching', 'loading_model', 'downloading_model', 'detecting_language', 'transcribing', 'writing'];
 
-function renderScreenDShell(source) {
-  const name = App.fileSource ? App.fileSource.display_name : (source && source.path ? source.path.split('\\').pop() : '');
+function renderScreenDShell() {
+  let name = '';
+  let title = '';
+  if (App.fileSource) {
+    name = App.fileSource.display_name;
+    title = App.fileSource.path;
+  } else if (App.urlSource) {
+    name = App.urlSource.title || App.urlSource.url;
+    title = App.urlSource.url;
+  }
   el('d-origin-name').textContent = name;
-  el('d-origin-name').title = App.fileSource ? App.fileSource.path : '';
+  el('d-origin-name').title = title;
   el('d-writing-warning').classList.add('hidden');
   el('d-cancel-note').textContent = '';
   el('d-cancel').textContent = 'Cancelar';
@@ -1078,7 +1100,9 @@ function renderScreenDShell(source) {
 }
 
 function renderPhaseTrail(phase) {
-  const relevant = PHASE_ORDER.filter((p) => p !== 'downloading_model' || phase === 'downloading_model');
+  const relevant = PHASE_ORDER.filter((p) =>
+    (p !== 'downloading_model' || phase === 'downloading_model') &&
+    (p !== 'fetching' || phase === 'fetching'));
   const currentIdx = relevant.indexOf(phase);
   el('d-phase-trail').innerHTML = relevant
     .map((p, i) => {

@@ -13,7 +13,14 @@ no reventar con `UnicodeEncodeError` al imprimirlo.
 Uso:
     py -3 cli.py "C:\\ruta\\audio.wav"
     py -3 cli.py "C:\\ruta\\video.mp4" --language es --model-id base
+    py -3 cli.py "https://www.youtube.com/watch?v=XXXXXXXXXXX"
     py -3 cli.py --self-check                    (lote 7 / ADR-0002 Sec.6 y 14)
+
+Un argumento posicional que empiece por `http://` o `https://` se trata como
+enlace: se descarga con `fetch.py` (MOTOR, ARCHITECTURE.md Sec.3) a `work/`
+antes de transcribir, con el mismo `player_clients`/tope de tamano que
+resolveria `settings.py` en las otras dos cascaras -- aqui se pasan por flag
+(`--player-clients`, `--max-bytes`) porque este arnes no lee `settings.json`.
 
 `--self-check` no transcribe nada del usuario: imprime las `DeviceCapabilities`
 reales, la `DeviceChoice` que resuelve `resolve_device()` y ejecuta la prueba de
@@ -27,16 +34,27 @@ import argparse
 import dataclasses
 import sys
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from catalog import CATALOG
 from errors import CoreError
 import export
+import fetch
 import transcribe
 
 TOOL_DIR = Path(__file__).resolve().parent
 DEFAULT_MODELS_DIR = TOOL_DIR / "models"
+DEFAULT_WORK_DIR = TOOL_DIR / "work"
+
+
+def _is_url(value: str) -> bool:
+    """Mismo criterio que `fetch.py` (ARCHITECTURE.md Sec.3/11): solo http/https
+    cuentan como enlace; cualquier otra cosa se trata como ruta de archivo.
+    """
+    return urlsplit(value).scheme.lower() in ("http", "https")
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -44,8 +62,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         description="Transcribe un archivo local con faster-whisper (lote 1, sin cascara).",
     )
     parser.add_argument(
-        "media_path", type=Path, nargs="?", default=None,
-        help="ruta al archivo de audio o video. Omitir junto con --self-check",
+        "media_path", nargs="?", default=None,
+        help="ruta al archivo de audio/video, o un enlace http(s). Omitir junto con --self-check",
     )
     parser.add_argument(
         "--self-check", action="store_true",
@@ -72,6 +90,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="hueco de pausa (segundos) que abre parrafo nuevo; por defecto, el de export.py (2.0)",
     )
     parser.add_argument("--no-download", action="store_true", help="no descargar el modelo si falta")
+    parser.add_argument(
+        "--player-clients", default="android,ios,tv,web",
+        help="orden de intento de yt-dlp para un origen de enlace (ADR-0001 D26), "
+             "separado por comas; mismo valor por defecto que settings.py",
+    )
+    parser.add_argument(
+        "--max-bytes", type=int, default=2147483648,
+        help="tope de descarga para un origen de enlace, en bytes (2 GiB por defecto, igual que settings.py)",
+    )
     return parser.parse_args(argv)
 
 
@@ -205,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
         return _self_check(args)
 
     if args.media_path is None:
-        _print("ERROR: falta la ruta del archivo (o usa --self-check).")
+        _print("ERROR: falta la ruta del archivo o el enlace (o usa --self-check).")
         return 2
 
     spec = CATALOG.get(args.model_id)
@@ -213,113 +240,168 @@ def main(argv: list[str] | None = None) -> int:
         _print(f"ERROR: model-id desconocido: {args.model_id!r}")
         return 2
 
-    media_path = args.media_path.resolve()
-    output_dir = (args.output_dir or media_path.parent).resolve()
     formats = [item.strip() for item in args.formats.split(",") if item.strip()]
 
-    # Resolucion de dispositivo (ARCHITECTURE.md Sec.3): la cascara solo pide una
-    # preferencia; la politica vive entera en transcribe.resolve_device().
-    caps = transcribe.probe_devices()
-    device_choice = transcribe.resolve_device(spec, caps, preference=args.device_preference)
-    if args.compute_type:
-        device_choice = dataclasses.replace(device_choice, compute_type=args.compute_type)
-    if args.cpu_threads is not None:
-        device_choice = dataclasses.replace(device_choice, cpu_threads=args.cpu_threads)
-
-    _report_device_fallback(args.device_preference, device_choice)
-
-    _print(f"Cargando modelo '{args.model_id}' en {device_choice.device} (compute_type={device_choice.compute_type})...")
-    load_start = time.monotonic()
+    # Un job_id solo existe si el origen es un enlace -- es el nombre del
+    # temporal en work/ (fetch.py) y lo que se purga al terminar, exito o no.
+    fetched_job_id = "cli_" + uuid.uuid4().hex[:12] if _is_url(args.media_path) else None
     try:
-        model = transcribe.load_model(
-            args.model_id,
-            args.models_dir,
-            device_choice,
-            allow_download=not args.no_download,
+        if fetched_job_id is not None:
+            DEFAULT_WORK_DIR.mkdir(parents=True, exist_ok=True)
+            _print(f"Descargando: {args.media_path}")
+            last_reported_fetch_pct = -1
+
+            def on_fetch_progress(downloaded: int, total: int | None) -> None:
+                nonlocal last_reported_fetch_pct
+                if total:
+                    pct = int(downloaded / total * 100)
+                    if pct != last_reported_fetch_pct:
+                        last_reported_fetch_pct = pct
+                        _print(f"  [{pct:3d}%] {downloaded} de {total} bytes")
+
+            try:
+                fetched = fetch.fetch_audio(
+                    args.media_path,
+                    DEFAULT_WORK_DIR,
+                    fetched_job_id,
+                    player_clients=[c.strip() for c in args.player_clients.split(",") if c.strip()],
+                    max_bytes=args.max_bytes,
+                    on_progress=on_fetch_progress,
+                    should_cancel=lambda: False,  # este arnes no tiene otro hilo que pueda cancelar
+                )
+            except CoreError as err:
+                _print_error(err)
+                return 1
+            if fetched.has_video:
+                # Flujo NORMAL, no un error (ARCHITECTURE.md Sec.3): esa
+                # plataforma no ofrecio audio suelto y cayo un stream muxeado.
+                _print(
+                    f"Nota: esa plataforma no ofrece hoy una pista de audio suelta; se "
+                    f"descargaron {fetched.bytes_downloaded} bytes de video+audio. El texto sale igual."
+                )
+            media_path = fetched.path
+            base_name = fetched.title  # export.write_outputs lo sanea (ARCHITECTURE.md Sec.7)
+            source_label = args.media_path
+            output_dir = (args.output_dir or (TOOL_DIR / "salida")).resolve()
+        else:
+            media_path = Path(args.media_path).resolve()
+            base_name = media_path.stem
+            source_label = str(media_path)
+            output_dir = (args.output_dir or media_path.parent).resolve()
+
+        # Resolucion de dispositivo (ARCHITECTURE.md Sec.3): la cascara solo pide una
+        # preferencia; la politica vive entera en transcribe.resolve_device().
+        caps = transcribe.probe_devices()
+        device_choice = transcribe.resolve_device(spec, caps, preference=args.device_preference)
+        if args.compute_type:
+            device_choice = dataclasses.replace(device_choice, compute_type=args.compute_type)
+        if args.cpu_threads is not None:
+            device_choice = dataclasses.replace(device_choice, cpu_threads=args.cpu_threads)
+
+        _report_device_fallback(args.device_preference, device_choice)
+
+        _print(f"Cargando modelo '{args.model_id}' en {device_choice.device} (compute_type={device_choice.compute_type})...")
+        load_start = time.monotonic()
+        try:
+            model = transcribe.load_model(
+                args.model_id,
+                args.models_dir,
+                device_choice,
+                allow_download=not args.no_download,
+            )
+        except CoreError as err:
+            _print_error(err)
+            return 1
+        _print(f"Modelo listo en {time.monotonic() - load_start:.1f} s")
+
+        last_reported_pct = -1
+
+        def on_segment(segment: transcribe.Segment, progress: float) -> None:
+            nonlocal last_reported_pct
+            pct = int(progress * 100)
+            if pct != last_reported_pct:
+                last_reported_pct = pct
+                _print(f"  [{pct:3d}%] {segment.start:7.1f}s  {segment.text}")
+
+        def should_cancel() -> bool:
+            return False
+
+        _print(f"Transcribiendo: {media_path}")
+        try:
+            result = transcribe.transcribe(
+                media_path,
+                model,
+                language=args.language,
+                vad_filter=not args.no_vad,
+                word_timestamps=not args.no_word_timestamps,
+                on_segment=on_segment,
+                should_cancel=should_cancel,
+            )
+        except CoreError as err:
+            _print_error(err)
+            return 1
+
+        # Segundo punto donde puede aparecer un fallback (ADR-0002 E8): si
+        # `device_choice.device == "cuda"` no hubo aviso previo (se creia disponible),
+        # pero `load_model()` pudo haber recaido en CPU tras la prueba de humo real
+        # DENTRO de `transcribe.load_model()`. `result.device_used` es la verdad final;
+        # `device_choice` (arriba) es solo la intencion antes de cargar. Sin este
+        # chequeo, esa caida queda muda -- exactamente el sintoma que ADR-0002 prohibe.
+        if device_choice.device == "cuda":
+            _report_device_fallback(args.device_preference, result.device_used)
+
+        _print(
+            "Terminado: idioma=%s (%.0f%%) duracion=%.1fs elapsed=%.1fs speed_ratio=%.2fx "
+            "segmentos=%d dispositivo=%s"
+            % (
+                result.language,
+                result.language_probability * 100,
+                result.media_duration_seconds,
+                result.elapsed_seconds,
+                result.speed_ratio,
+                len(result.segments),
+                result.device_used.device,
+            )
         )
-    except CoreError as err:
-        _print_error(err)
-        return 1
-    _print(f"Modelo listo en {time.monotonic() - load_start:.1f} s")
 
-    last_reported_pct = -1
+        meta = {
+            "title": base_name,
+            "source": source_label,
+            "media_duration_seconds": result.media_duration_seconds,
+            "language": result.language,
+            "language_probability": result.language_probability,
+            "model_id": args.model_id,
+            "compute_type": result.device_used.compute_type,
+            "device": result.device_used.device,
+            "transcribed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
 
-    def on_segment(segment: transcribe.Segment, progress: float) -> None:
-        nonlocal last_reported_pct
-        pct = int(progress * 100)
-        if pct != last_reported_pct:
-            last_reported_pct = pct
-            _print(f"  [{pct:3d}%] {segment.start:7.1f}s  {segment.text}")
+        write_kwargs = {}
+        if args.paragraph_gap_seconds is not None:
+            write_kwargs["paragraph_gap_seconds"] = args.paragraph_gap_seconds
 
-    def should_cancel() -> bool:
-        return False
+        try:
+            written = export.write_outputs(
+                result.segments, meta, output_dir, base_name, formats, **write_kwargs
+            )
+        except OSError as exc:
+            _print(f"ERROR al escribir la salida: {exc}")
+            return 1
 
-    _print(f"Transcribiendo: {media_path}")
-    try:
-        result = transcribe.transcribe(
-            media_path,
-            model,
-            language=args.language,
-            vad_filter=not args.no_vad,
-            word_timestamps=not args.no_word_timestamps,
-            on_segment=on_segment,
-            should_cancel=should_cancel,
-        )
-    except CoreError as err:
-        _print_error(err)
-        return 1
+        for written_file in written:
+            _print(f"Escrito: {written_file.path} ({written_file.bytes} bytes)")
 
-    # Segundo punto donde puede aparecer un fallback (ADR-0002 E8): si
-    # `device_choice.device == "cuda"` no hubo aviso previo (se creia disponible),
-    # pero `load_model()` pudo haber recaido en CPU tras la prueba de humo real
-    # DENTRO de `transcribe.load_model()`. `result.device_used` es la verdad final;
-    # `device_choice` (arriba) es solo la intencion antes de cargar. Sin este
-    # chequeo, esa caida queda muda -- exactamente el sintoma que ADR-0002 prohibe.
-    if device_choice.device == "cuda":
-        _report_device_fallback(args.device_preference, result.device_used)
-
-    _print(
-        "Terminado: idioma=%s (%.0f%%) duracion=%.1fs elapsed=%.1fs speed_ratio=%.2fx "
-        "segmentos=%d dispositivo=%s"
-        % (
-            result.language,
-            result.language_probability * 100,
-            result.media_duration_seconds,
-            result.elapsed_seconds,
-            result.speed_ratio,
-            len(result.segments),
-            result.device_used.device,
-        )
-    )
-
-    meta = {
-        "title": media_path.stem,
-        "source": str(media_path),
-        "media_duration_seconds": result.media_duration_seconds,
-        "language": result.language,
-        "language_probability": result.language_probability,
-        "model_id": args.model_id,
-        "compute_type": result.device_used.compute_type,
-        "device": result.device_used.device,
-        "transcribed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-    }
-
-    write_kwargs = {}
-    if args.paragraph_gap_seconds is not None:
-        write_kwargs["paragraph_gap_seconds"] = args.paragraph_gap_seconds
-
-    try:
-        written = export.write_outputs(
-            result.segments, meta, output_dir, media_path.stem, formats, **write_kwargs
-        )
-    except OSError as exc:
-        _print(f"ERROR al escribir la salida: {exc}")
-        return 1
-
-    for written_file in written:
-        _print(f"Escrito: {written_file.path} ({written_file.bytes} bytes)")
-
-    return 0
+        return 0
+    finally:
+        if fetched_job_id is not None:
+            # D15: el temporal descargado se limpia al terminar -- exito, error
+            # o fallo de escritura -- igual que jobs.py purga work/ tras cada
+            # trabajo; aqui no hay JobManager que lo haga por su cuenta.
+            for leftover in DEFAULT_WORK_DIR.glob(f"{fetched_job_id}.*"):
+                try:
+                    leftover.unlink()
+                except OSError:
+                    pass
 
 
 if __name__ == "__main__":

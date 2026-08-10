@@ -228,7 +228,13 @@ def resolve_device(spec: ModelSpec, caps: DeviceCapabilities,
     # buscar en el catalogo y sigue siendo una funcion PURA de sus argumentos.
     # FUNCION PURA: no toca hardware, solo decide a partir de `caps`. Es lo que permite
     # probar la politica de una RTX 3080 desde una GTX 1050 Ti (ver 14).
-    # preference: "auto" | "cuda" | "cpu"  <- lo UNICO que puede llegar de la cascara.
+    # preference: "auto" | "cuda" | "cuda_required" | "cpu"
+    #   auto           -> decide por capacidades (por defecto)
+    #   cuda           -> prefiere GPU; si no puede, CAE A CPU con el motivo registrado
+    #   cuda_required  -> si la GPU no es usable, NO transcribe: error con la causa
+    #   cpu            -> CPU y punto
+    # Es lo UNICO que puede llegar de la cascara sobre el dispositivo, y SIGNIFICA LO
+    # MISMO en la ventana y en el servidor.
 ```
 
 **Política de `resolve_device()`, escrita una sola vez y en el motor** (ADR-0001 §17.2):
@@ -255,6 +261,25 @@ def resolve_device(spec: ModelSpec, caps: DeviceCapabilities,
 es la **calidad del texto**, así que **no se cuantiza más de lo que el hardware obligue**. En una Ampere
 eso significa `float16` aunque `int8` fuera más rápido; en una Pascal, `int8` es el único camino y la
 pérdida se acepta porque es la máquina de desarrollo.
+
+> ### Pedir GPU explícitamente: `cuda` degrada, `cuda_required` falla — y significan lo mismo en las dos cáscaras
+>
+> **Aquí me aparto de la lectura que me llegó**, que proponía que `cuda` degradara en la ventana y fallara
+> en el servidor. **No.** Sería **la misma cadena significando dos cosas distintas según dónde se lea**, y
+> el primer bot escrito con la documentación de la ventana se llevaría la sorpresa. Peor: sería **una
+> cáscara inventando política**, que es exactamente lo que prohíben D11 y D17 — la política vive en el
+> motor, las cáscaras son finas.
+>
+> La intención del que llama **se expresa en el valor, no en el contexto**: quien quiera "GPU o nada" pide
+> **`cuda_required`**, y lo obtiene igual desde la ventana que desde el bot.
+>
+> **La causa del fallo no cambia; solo cambia si es fatal.** Con `cuda_required`, los mismos tres códigos
+> (`gpu_libraries_missing`, `gpu_out_of_memory`, `gpu_unavailable`) se emiten **como error en vez de como
+> aviso**. No se inventa un cuarto código: el vocabulario de causas ya está completo, y lo único que
+> cambia es la severidad.
+>
+> **Valor por defecto en las dos cáscaras: `auto`.** Tampoco el servidor arranca con otro: un valor por
+> defecto distinto por cáscara es el mismo error con otra ropa.
 
 #### Recomendar un modelo NO es resolver un dispositivo — separación deliberada
 
@@ -648,6 +673,11 @@ es el recomendado depende del hardware** y lo calcula `recommend_profile()`. El 
     "fell_back_from": null,             // "cuda" si se pidio GPU y no se pudo
     "fallback_reason": null             // codigo estable; messages.py lo traduce a un AVISO
   },
+  // ^ SE ESCRIBE DESPUES de que load_model() devuelva, con el DeviceChoice realmente
+  //   usado tras la prueba de humo. JAMAS con la salida de resolve_device(), que es
+  //   solo la INTENCION y la prueba de humo puede desmentirla. Un unico escritor.
+  //   Ver ADR-0002 seccion 8.7: esta regla ya se violo una vez y el sintoma fue que
+  //   el .md exportado decia la verdad y el estado en vivo mentia.
   "result": {                           // null hasta state=done
     "language": "es", "language_probability": 0.99,
     "segment_count": 412, "character_count": 18422,
@@ -863,6 +893,34 @@ HTTP de los errores: `202` encolado · `400` inválida · `403` token · `404` d
 `429` `queue_full` · `507` `disk_full` · `500` interno. **No existe `409`**: con cola FIFO, estar ocupado
 no es un error.
 
+> ### `GET /health` expone la caída, no solo el dispositivo — sí, se amplía el esquema
+>
+> **El bot es justo el cliente que no puede ver un aviso por pantalla.** Hoy `/health` dice `device` y
+> `compute_type`, que tras la corrección de ADR-0002 §8.7 ya son veraces — pero **`device: "cpu"` es
+> ambiguo**: puede significar "esta máquina no tiene GPU" (normal) o "hay GPU y está rota" (hay que
+> arreglar algo). **Son dos situaciones con acciones distintas para el operador, y el bot no puede
+> distinguirlas.** Eso las hace indistinguibles justo para quien tendría que actuar.
+>
+> Se añade:
+>
+> ```jsonc
+> "device": {
+>   "cuda_status": "probable",        // unavailable | probable | confirmed
+>   "unavailable_reason": null,       // codigo estable cuando cuda_status = unavailable
+>   "last_used": {                    // null si aun no ha corrido ningun trabajo
+>     "device": "cpu", "compute_type": "int8",
+>     "fell_back_from": "cuda", "fallback_reason": "gpu_libraries_missing"
+>   }
+> }
+> ```
+>
+> **`cuda_status` nunca dice `confirmed` antes de que la prueba de humo lo demuestre** (§6): al arrancar
+> es `probable`, y solo el primer trabajo lo confirma o lo desmiente. `last_used` es el **resultado**, no
+> la intención (ADR-0002 §8.7).
+>
+> **No hace falta subir a `/api/v2`:** añadir campos es compatible hacia atrás — un cliente que no los
+> conozca los ignora. Por eso el prefijo `/api/v1` se puso desde el primer día.
+
 > **`pick_folder()` es la décima, y tapa un hueco que dejé yo.** §11 dice *"la carpeta de destino sí la
 > elige quien llama"*, pero ninguna operación la exponía: la interfaz solo podía enseñarla en solo
 > lectura. Es una línea en la ventana (`create_file_dialog(FOLDER_DIALOG)`) y **no toca el núcleo**:
@@ -1054,7 +1112,7 @@ lado, sus claves pisan a las de por defecto. **El motor nunca lee ninguno de los
 | Clave | Por defecto | Qué es |
 |---|---|---|
 | `default_model_id` | 🚫 **lo fija ADR-0002** | modelo a usar |
-| **`device_preference`** | `"auto"` | `"auto"` \| `"cuda"` \| `"cpu"`. **Es lo único que la cáscara puede decir sobre el dispositivo**; la política vive en `resolve_device()` (§3) |
+| **`device_preference`** | `"auto"` | `"auto"` \| `"cuda"` (prefiere, **degrada con aviso**) \| `"cuda_required"` (**falla si no hay GPU**) \| `"cpu"`. **Significan lo mismo en la ventana y en el servidor**, y el valor por defecto también (§3) |
 | `compute_type_override` | `null` | **`null` = manda `resolve_device()`.** Fijarlo a mano solo para depurar: un valor fijo aquí **sería incorrecto en al menos una de las dos máquinas del dueño** (ADR-0001 §17.1) |
 | `cpu_threads` | `0` | 0 = decide CTranslate2. Ignorado en GPU |
 | `language` | `null` | `null` = detección automática; `"es"`/`"en"` la fuerzan |
@@ -1164,12 +1222,24 @@ todas formas (tope de 100 MB por archivo).
 | **7** | **GPU (ADR-0002):** `install-gpu.ps1`, `uninstall-gpu.ps1`, `requirements-gpu.txt`, `add_cuda_dlls_to_path()`, imports perezosos, `smoke_test_cuda()`, catálogo con VRAM medida | el instalador **termina ejecutando la prueba de humo y dice el resultado** · desinstalar sin GPU no rompe nada · los tres códigos de fallo dan tres mensajes distintos | **HECHO** |
 | **8** | `catalog.py` como hoja + `recommend_profile()` en `transcribe.py` | verificado con ejecución real: `large-v3-turbo` en la 1050 Ti, `small` en CPU sola, **sin `--model-id`** · `grep` confirma que `transcribe.py` no importa `models.py` | **HECHO** |
 | **9** | **Enmiendas de contrato del 2026-08-10:** `probe_media()` + validación síncrona al encolar · `pick_folder()` (décima operación) · corregir `small.speed_ratio["cpu_int8"]` a **1.534** y reescalar `medium`/`turbo` · limpiar el docstring caducado de `jobs.py::_acquire_model` | la espera estimada existe **desde el primer trabajo** · un fichero sin audio falla **al encolar**, no tras cargar el modelo · ningún comentario del código cita números de lote | **siguiente** |
+| **10** | **`cuda_required` + `/health` con estado real del dispositivo** | pedir `cuda_required` sin GPU **no transcribe** y devuelve la causa · `cuda` sigue degradando **con la caída registrada** · `/health` distingue "sin GPU" de "GPU rota" · **prueba obligatoria: forzar la caída y comprobar que el ESTADO EN VIVO la refleja**, no solo el `.md` (ADR-0002 §8.7) | pendiente |
+| **11** | **Cableado de enlaces:** fase `fetching` en `jobs.py` uniendo `fetch.py` con la cola, y las tres cáscaras | pegar una URL de YouTube en la ventana produce un `.md` · el mismo trabajo por `POST /api/v1/jobs` · `probe_url()` enseña título y duración **antes** de descargar | pendiente |
 
 **V1 es la verificación que puede cambiar el valor por defecto** (ADR-0001 D5): si 10 minutos de audio en
 español dan menos de 3× tiempo real, `base` pasa a ser el modelo por defecto, sin ADR nuevo.
 
 **El lote 4 va tarde a propósito**: es el único frágil. Si hubiera que soltar antes, los lotes 1-3 y 5 ya
 dan una herramienta completa para archivos locales.
+
+> **Por qué existe el lote 11, y la lección de descomposición que deja.** La fase `fetching` estaba
+> especificada en §4.3 desde el primer día y `fetch.py` se construyó y se verificó (S7 en verde). Lo que
+> no existía era **el cable**: nadie unía `fetch.py` con la cola. Al repartir los lotes **por archivo**,
+> el trabajo que vive *entre* dos archivos no cayó en ninguno, **y todos pudieron dar verde sobre una
+> funcionalidad que no funcionaba de punta a punta**.
+>
+> **El contrato no falló; la descomposición sí.** Regla para los que queden: **todo lote cuyo valor
+> dependa de dos módulos declara un criterio de aceptación de punta a punta**, no por archivo. El del
+> lote 11 es literal: *"pegar una URL en la ventana produce un `.md`"*.
 
 **El lote 6 es la prueba de falsación de las tres capas** (ADR-0001 D18): si escribir la segunda cáscara
 obliga a tocar `transcribe.py`, `fetch.py`, `export.py` o `models.py`, el desacople era decorativo y hay
@@ -1281,6 +1351,13 @@ por igualdad exacta.
   `storage_path` propio evita el `E_ABORT` medido en el spike (§6.1).
 - **Enlace muxeado:** descargar un vídeo de YouTube y confirmar que `has_video=True` produce un **aviso**,
   no un error, y que la transcripción sale igual.
+- **Caída de GPU visible en vivo (obligatoria, ADR-0002 §8.7):** forzar que la prueba de humo falle
+  —renombrando las DLL de CUDA, por ejemplo— pedir `device_preference="cuda"` y comprobar **las tres
+  superficies a la vez**: el estado del trabajo trae `fell_back_from="cuda"` con su motivo, la interfaz
+  enseña el aviso, y `GET /health` lo refleja en `last_used`. **No basta con mirar el `.md` exportado**:
+  ese fue justo el que decía la verdad mientras el estado en vivo mentía.
+- **`cuda_required`:** la misma situación con `device_preference="cuda_required"` **no transcribe** y
+  devuelve el código de la causa, idéntico desde la ventana y desde el servidor.
 - **Escritura:** rutas con espacios, un título con caracteres inválidos (`¿Qué? / cómo: 1|2`) y un intento
   de travesía de directorios en el nombre de salida.
 
