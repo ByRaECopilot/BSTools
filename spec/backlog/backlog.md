@@ -21,6 +21,9 @@
 - Mermaid: cargar el `.mmd` del menú contextual directamente en el editor (hoy hay que pegar el
   contenido).
 - Mermaid: autoruteo ortogonal de las flechas.
-- Voice2Text: herramienta nueva para transcribir un audio/vídeo local o un enlace público a `.txt` y `.md`
-  (diseño aceptado en `spec/decisions/ADR-0001-voice2text-stack.md`, spike del lote 0 hecho; pendiente de
-  construir los lotes 1-6).
+- Voice2Text: transcribe un audio/vídeo local o un enlace público a `.txt` y `.md`, en la propia máquina
+  (diseño en `spec/decisions/ADR-0001-voice2text-stack.md` y `spec/decisions/ADR-0002-voice2text-modelo-y-gpu.md`).
+  **v1.0 construida y verificada** (`apps/Voice2Text/VERIF-FINAL.md`): los seis recorridos de uso funcionan
+  de punta a punta. Queda abierto el lote 10 (`ARCHITECTURE.md` §13): `cuda_required` y el bloque de
+  dispositivo de `GET /health` (distinguir "sin GPU" de "GPU rota"). El perfil de producción (RTX 3080)
+  sigue condicionado a medir en esa tarjeta (ADR-0002 §4, V7).

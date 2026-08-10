@@ -21,7 +21,7 @@ updated: 2026-08-10
 > |---|---|---|
 > | **D20** (techo de instalación de 1 GB) | §2 | El techo nunca fue de la instalación. Se sustituye por un **presupuesto de modelo** + **obligación de transparencia** sobre el total |
 > | **D5** (modelo por defecto `small`) | §2, §6 | Con calidad como prioridad y ~1 GB de presupuesto de modelo, `small` (464 MB) ya no es la elección obvia: entran `medium` y `large-v3-turbo`. **Reabierto, pendiente de las cifras del spike de GPU** |
-> | **La cláusula condicional V1** (bajar a `base` si < 3× tiempo real) | D5, §14, §16 | **SUSPENDIDA.** Está exactamente del revés: degradaba el modelo para ganar velocidad cuando la prioridad declarada es la calidad. Ya no puede dispararse |
+> | **La cláusula condicional V1** (bajar a `base` si < 3× tiempo real) | D5, §14, §16 | **RETIRADA por ADR-0002 E14**, no solo suspendida. V1 cerró en **1,725×**, así que **su condición literal SÍ se cumple** — y aun así no se aplica. Razonamiento completo en **ADR-0002 §8.5**. Ya no existe ninguna regla automática que cambie el modelo por defecto |
 > | **La regla pre-comprometida de peso** (≤ 0,9 / 0,9-1,0 / > 1,0 GB) | §7 | Ya no refleja la intención del dueño. El peso total **se reporta, no se limita** |
 > | Marcas de "supera el techo" en el catálogo | §6, `ARCHITECTURE.md` §3 y §8 | El criterio de marcado cambia |
 > | La justificación por peso de rechazar `openai-whisper` | §12 | El argumento del techo se evapora. **El rechazo sigue en pie por otras razones**, pero hay que reescribirlas |
@@ -214,13 +214,19 @@ una forma que este ADR no había anticipado. No fue que yt-dlp se rompiera por u
 **el catálogo de formatos accesibles sin cookies se redujo a uno solo, y ese uno viene muxeado**. Es una
 observación con fecha [O], no una propiedad del diseño: mañana puede haber tres formatos o ninguno.
 
-### 3.3 La grieta que sigue abierta
+### 3.3 La grieta que se temía: **cerrada en verde, mejor de lo previsto**
 
-Hay fuentes que **solo** sirven HLS (`.m3u8`) — X/Twitter y parte de Facebook. Ahí yt-dlp usa su
-descargador HLS nativo, que concatena fragmentos sin ffmpeg (`hls_prefer_native`), y el resultado es un
-MPEG-TS o un fMP4 concatenado que **PyAV normalmente decodifica, pero "normalmente" no es "siempre"**.
-**No se probó en el spike (S7 sigue abierto).** Si falla, el código es `decode_failed` y el usuario ve que
-ese enlace no se puede leer. **No se resuelve metiendo ffmpeg.**
+Se anticipaba que las fuentes que **solo** sirven HLS (`.m3u8`) —X/Twitter y parte de Facebook— darían un
+MPEG-TS o un fMP4 concatenado que *"PyAV normalmente decodifica, pero normalmente no es siempre"*.
+
+**Medido el 2026-08-10 (S7, lote 4): X sirvió una pista de audio-only por HLS nativo y PyAV la abrió sin
+ffmpeg.** Ni siquiera hizo falta el caso concatenado que se temía. **Este apartado era pesimista.**
+
+**El matiz que no se retira** [O]: es **una** observación fechada sobre **una** fuente. X y Facebook siguen
+exigiendo sesión para la mayor parte de su contenido, y eso no lo arregla ningún avance técnico: lo cierra
+D6 por diseño. Y si algún día cae un contenedor que PyAV no pueda leer, el código sigue siendo
+`decode_failed` y **sigue sin resolverse metiendo ffmpeg**. El mecanismo previsto era correcto; la
+probabilidad estimada de que hiciera falta, no.
 
 ---
 
@@ -660,12 +666,12 @@ contenido que cada uno transcriba.
 | **S8** | pywebview instala limpio y abre ventana | **VERDE [M]** | `6.2.1`, ~8 MB, ventana real. Advertencia convertida en **D25** (`storage_path` propio) |
 | **S9** | Sin *redistributable* de Visual C++ ausente | **PARCIAL [M]** | Instaló y ejecutó en la máquina del dueño. **Sin probar en máquina limpia**; si aparece, se documenta en Problemas comunes |
 | **S10** | Tamaño del modelo ±5 % | **CERRADO [M]** | 464 MB frente a 484 estimados: −4 % |
-| **S3** | Velocidad con **10 min de audio en español**, en el modelo y el dispositivo que decida ADR-0002 | **ABIERTO, reencuadrado** | El spike midió **2,8× sobre 42,7 s en inglés** con `small` en CPU [M]. 🚫 **Ya no dispara nada**: la cláusula condicional está suspendida. Sigue siendo la verificación **V1** del lote 1, pero ahora su función es **informar la estimación que ve el usuario**, no elegir el modelo |
-| **S4** | Progreso de descarga del modelo | **ABIERTO** | El modelo se descargó, pero no se probó cómo reportar su progreso. Plan B ya escrito: sondear el tamaño de `models/` |
-| **S7** | Un enlace de X con HLS produce algo que PyAV lee | **ABIERTO** | No se probó. Si falla → `decode_failed` y se documenta. **No se resuelve con ffmpeg** |
+| **S3 / V1** | Velocidad con **10 min de audio en español** | **CERRADO EN VERDE (2026-08-10)** | **1,725× = 5,80 min/10min en español**, con evidencia de aislamiento; control en inglés 1,534× = 6,52 min/10min. El **2,8× del spike no generalizaba** de un clip sintético de 42,7 s a habla continua. 🚫 **Su condición dispara la cláusula de D5 y aun así NO se aplica**: la cláusula queda **retirada** por ADR-0002 E14, con el razonamiento completo en su §8.5 |
+| **S4** | Progreso de descarga del modelo | **CERRADO EN VERDE (lote 2)** | Ninguna de las dos vías previstas: `snapshot_download()` se **midió y se rechazó** (un salto único de 145 MB; al cancelar, el archivo sigue bajando ~7 s). Se descarga a mano en trozos de 256 KiB, cancelación en milisegundos y reanudación por `Range`; verificado que carga con `local_files_only=True`. Aviso de "no simplificar" en `ARCHITECTURE.md` §3 |
+| **S7** | Un enlace de X con HLS produce algo que PyAV lee | **CERRADO EN VERDE (lote 4)** | **Mejor de lo previsto:** X sirvió **audio-only por HLS nativo** y PyAV lo abrió sin ffmpeg — no llegó a aparecer el fMP4 concatenado que se temía. §3.3 era pesimista y queda corregida |
 | **S11** | Detección **automática** de idioma en español e inglés | **DESBLOQUEADO (2026-08-10), en ejecución** | Las corridas del spike forzaron el idioma. El dueño instaló `Microsoft Sabina Desktop` (`es-MX`), **verificada visible para SAPI** con `GetInstalledVoices()`. Entrega en `VERIF-ESPANOL.md`. **La voz sintética vale para idioma y velocidad, NO para calidad de texto** (ADR-0002 §10) |
-| **S12** | El cerrojo exclusivo de archivo no deja fantasmas | **ABIERTO** | Se verifica en el lote 2 |
-| **S13** | Soltar el modelo libera la memoria nativa; coste de recarga | **ABIERTO** | Se verifica en el lote 2. Si no libera, **D22 se retira** y el modelo se queda cargado mientras viva el proceso |
+| **S12** | El cerrojo exclusivo de archivo no deja fantasmas | **CERRADO EN VERDE (lote 2)** | Probado matando el proceso **a la fuerza**, que es el único caso que importaba: el sistema operativo suelta el cerrojo y la instancia siguiente arranca. **D21 se sostiene con ejecución real** |
+| **S13** | Soltar el modelo libera la memoria nativa; coste de recarga | **CERRADO (lote 2)** | Verificado con ejecución real. **D22 se mantiene**; su valor por defecto en CPU sigue pendiente de la revisión que ya anotó D22 (con la RAM sin límite, en CPU el temporizador aporta poco) |
 | **V2** | Los huecos entre segmentos con **`vad_filter=True`** (nuestra configuración real) | **CERRADO [M], 2026-08-10** | **No se reconstruyen solos.** Con 4 silencios construidos por muestra exacta (3,5/6,0/1,0/4,3 s), el hueco medido entre `end` y el `start` siguiente fue **0,000 s en los cuatro casos**, igual que con `vad_filter=False`. El VAD remapea los tiempos al medio original, pero **no libera el `end` de su estiramiento** hasta el `start` siguiente. `word_timestamps` **sigue haciendo falta** |
 | **V3** | Sobrecoste de `word_timestamps=True`, mismo clip con y sin | **CERRADO [M], 2026-08-10, con contaminación declarada** | **Muy por debajo de lo esperado: dentro del ruido de medición, ~0 %.** Ronda 1 (clip real 300 s, 2 corridas por config): −5,5 %. Ronda 2 (clip real 120 s, 4 corridas por config, intercaladas): False 81,22 s vs True 81,21 s de media → **−0,0 %**. La horquilla de +10-30 % [E] **no se cumplió, en sentido favorable** — contradice la propia advertencia de calibración de Kronos (que apuntaba a que sus estimaciones salen optimistas, no pesimistas). No se activa la cláusula de ajuste por perfil. ⚠️ **Ambas rondas corrieron con otro agente (`VERIF-ESPANOL.md`, Veritas/QA) transcribiendo en paralelo en la misma máquina**, confirmado por evidencia de proceso cruzada entre los dos informes. Al ser una comparación relativa e intercalada, la conclusión direccional (sobrecoste muy por debajo de 10-30 %) es robusta a ese ruido; la cifra exacta al decimal, no |
 | **V4** | ¿El **`start`** del segmento posterior a un silencio marca el inicio real del habla? | **CERRADO [M], 2026-08-10** | **Sí, dentro de ~30 ms**, en las cuatro posiciones de silencio probadas (después de 3,5/6,0/1,0/4,3 s): `start` observado 7,650/19,140/25,880/36,860 s vs. ground truth por construcción 7,679/19,162/25,911/36,869 s. Las marcas de tiempo del `.md` **son fiables**: el riesgo grave que abría esta verificación no se materializó |
@@ -699,13 +705,16 @@ el **presupuesto del modelo**.
   `ARCHITECTURE.md` §13 siguen siendo el plan.
 - **En cuarentena:** D5, D20, la regla por tramos de §7 y la cláusula condicional V1 — inventario completo
   en el aviso de cabecera.
-- **La cláusula condicional de D5 queda SUSPENDIDA y no puede dispararse.** Se pre-autorizó para degradar
-  el modelo si la velocidad no llegaba; con la calidad como prioridad declarada, eso es exactamente lo
-  contrario de lo que el dueño quiere.
+- **La cláusula condicional de D5 queda RETIRADA por ADR-0002 E14.** V1 cerró en **1,725×** con evidencia
+  de aislamiento, así que **su condición literal se cumple y aun así no se aplica**: se pre-autorizó para
+  degradar el modelo si la velocidad no llegaba, y con la calidad como prioridad declarada eso es lo
+  contrario de lo que el dueño quiere. Su umbral de 3× era además eco de una estimación que resultó **4-6×
+  optimista**. El razonamiento completo está en **ADR-0002 §8.5**, escrito precisamente para que dentro de
+  seis meses se entienda por qué una regla escrita aquí no se aplicó.
 
-**Instrumento de corrección: ADR-0002**, que decidirá **en una sola decisión** el modelo por defecto y la
-política de GPU (§17), cuando entreguen las cifras del spike de GPU. Se sigue respetando *append-only*: no
-se reescribe ninguna decisión aquí, se marca lo muerto y se decide en el documento nuevo.
+**Instrumento de corrección: [ADR-0002](ADR-0002-voice2text-modelo-y-gpu.md)**, ya escrito y aceptado.
+Decidió en un solo documento el catálogo de modelos por perfil y la política de GPU. Se respeta
+*append-only*: aquí no se reescribió ninguna decisión, solo se marcó lo muerto.
 
 ---
 

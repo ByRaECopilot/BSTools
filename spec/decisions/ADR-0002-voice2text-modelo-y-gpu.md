@@ -73,6 +73,8 @@ tercero. Un número sin marca es un error de redacción.
 | **E11** | **`float16` no se codifica en ninguna tabla nuestra**: se pregunta a `ctranslate2.get_supported_compute_types(...)`. Confirmado [M-dev]: en Pascal devuelve `{'int8','float32','int8_float32'}` y forzar `float16` da un `ValueError` **limpio, en la construcción**. Es hardware, no defecto: **no debe reproducirse en la 3080**. |
 | **E12** | **El artefacto sigue siendo fp16 y se cuantiza al cargar** (confirma ADR-0001 §17.3). Repos exactos en §3, con una nota de procedencia: **`large-v3-turbo` no tiene repo de `Systran`**; el de referencia de facto es `mobiuslabsgmbh/faster-whisper-large-v3-turbo`, también en fp16. Sigue sin usarse ningún repo pre-cuantizado en int8. |
 | **E13** | **El perfil de producción queda condicionado a una medición en la 3080**, con criterio de desempate escrito de antemano (§4). **No se cierra a ciegas.** |
+| **E14** | **La cláusula condicional de ADR-0001 D5 queda RETIRADA, no suspendida** — y no se dispara pese a que su condición literal se cumple con datos limpios (1,725× < 3×). Razonamiento completo en §8.5. Como este ADR supersede D5 entero, su cláusula muere con él. |
+| **E15** | **Ninguna cifra de rendimiento se publica sin evidencia de aislamiento** (`tasklist` + carga de CPU antes y después de la corrida). Las mediciones sin esa evidencia se marcan como **provisionales**, no se borran. Motivo en §8.6: dos cifras de este proyecto ya resultaron contaminadas por agentes trabajando en paralelo en la misma máquina. |
 
 ---
 
@@ -91,20 +93,46 @@ tercero. Un número sin marca es un error de redacción.
 El orden de calidad es **[E]**, derivado de tamaño y arquitectura: nunca se ha medido calidad en español.
 Es una deuda declarada, no un dato (§10).
 
-**Velocidad medida, mismo vídeo real, `vad_filter=True`** [M-dev]:
+**Velocidad medida** [M-dev]. **La columna de CPU del spike de GPU quedó desautorizada por una medición
+posterior con evidencia de aislamiento** (§8.6); se conserva marcada, no se borra:
 
-| Modelo | CPU int8 | CUDA int8 | Mejora |
-|---|---:|---:|---:|
-| `small` | **1,15×** | 7,94× | **6,9×** |
-| `medium` | 0,30× | 3,73× | **12,4×** |
-| `large-v3-turbo` | 0,34× | 7,05× | **20,7×** |
-| `large-v3` | ~0,15-0,3× [E] | no cabe en 4 GiB | — |
+| Modelo | CPU int8 (spike, **provisional**) | CPU int8 (**limpia**, con evidencia) | CUDA int8 | Mejora (horquilla, §8.6) |
+|---|---:|---:|---:|---:|
+| `small` | ~~1,15×~~ | **1,534× (en) · 1,725× (es)** | 7,94× | **5,2× - 6,9×** |
+| `medium` | ~~0,30×~~ | ~0,40× [E, reescalado] | 3,73× | **9,3× - 12,4×** |
+| `large-v3-turbo` | ~~0,34×~~ | ~0,45× [E, reescalado] | 7,05× | **15,5× - 20,7×** |
+| `large-v3` | ~0,15-0,3× [E] | — | no cabe en 4 GiB | — |
+
+**Unidad publicable** (ADR-0002 §8.4): `small`/CPU son **5,80 min de proceso por cada 10 min de audio en
+español** y **6,52 min en inglés** [M-dev, con evidencia de aislamiento].
+
+#### Qué valor exacto va en `catalog.py` — decisión, porque hay dos limpios y solo cabe uno
+
+`ModelSpec.speed_ratio` no tiene dimensión de idioma, y hay dos mediciones limpias: **1,725× (español,
+TTS)** y **1,534× (inglés, grabación real)**. **Va el 1,534.** Tres razones, en orden:
+
+1. **Es el más conservador**, y ese campo alimenta `estimated_wait_seconds`: una espera nunca se promete
+   mejor de lo que se entrega.
+2. **Viene de habla humana real**, no de TTS. El propio §8.1 de este ADR establece que **el audio
+   sintético tiene sesgo optimista** para medir rendimiento; usar el 1,725 sería contradecirlo.
+3. **Es solo el valor de arranque en frío.** En cuanto termina el primer trabajo, `jobs.py` cachea el
+   `speed_ratio` real por `(model_id, device)` (`ARCHITECTURE.md` §4.4) y el catálogo deja de mandar. No
+   hace falta una dimensión de idioma para un número que se sustituye solo.
+
+**Y el 1,15 anterior se retira del catálogo**: estaba desautorizado por §8.6 desde antes de que esa tabla
+existiera, y mientras siguiera ahí gobernaba el filtro de viabilidad y la espera estimada con un dato que
+este ADR ya había marcado como contaminado.
+
+**Los valores de CPU de `medium` (~0,40×) y `turbo` (~0,45×) entran reescalados y marcados [E]**, no con
+el 0,30/0,34 originales: cargar en el catálogo una cifra que este documento ha desautorizado sería peor
+que cargar una estimación honesta. Los tres se corrigen con **V8**. Ninguno cambia una sola decisión: los
+dos siguen por debajo del suelo de viabilidad de 1,0×.
 
 **Recomendación resultante, aplicando E1 y E2:**
 
 | Perfil | Candidatos que pasan el filtro | **Recomendado** | Por qué |
 |---|---|---|---|
-| **CPU sola** | `small` (1,15×) y `base`; `medium`, `turbo` y `large-v3` quedan fuera por correr **por debajo del tiempo real** | **`small` int8** | Es el de más calidad entre los viables. `medium` a 0,30× significa **33 minutos por cada 10 de audio**: eso no se recomienda, se elige a mano sabiendo lo que cuesta |
+| **CPU sola** | `small` (**1,725× es / 1,534× en**, limpio) y `base`; `medium`, `turbo` y `large-v3` quedan fuera por correr **por debajo del tiempo real** incluso tras reescalar la base (§8.6) | **`small` int8** | Es el de más calidad entre los viables. `medium`, aun con la corrección optimista (~0,40×), son **~25 minutos por cada 10 de audio**: eso no se recomienda, se elige a mano sabiendo lo que cuesta |
 | **DEV** (1050 Ti, 4 GiB) | `small`, `turbo`, `medium` en int8. `large-v3` **excluido por OOM medido**; `medium/float32` excluido por §7 | **`large-v3-turbo` int8** | Máxima calidad entre los que caben, **y además casi el más rápido** (7,05×) con solo 1575 MiB de VRAM |
 | **PROD** (3080, 10 GiB) | `large-v3` y `turbo`, ambos en `float16` [E] | **condicionado — §4** | Los dos caben; el desempate exige medir |
 
@@ -239,6 +267,109 @@ una conferencia real. **Lección transferible: el audio sintético sirve para pr
 medir rendimiento — y su sesgo es OPTIMISTA, en una sola dirección.** Toda cifra de velocidad se mide sobre
 audio real.
 
+### 8.5 Por qué la cláusula de D5 NO se dispara, aunque su condición se cumpla (E14)
+
+**Hay que escribirlo, no omitirlo:** una regla escrita en un ADR aceptado, cuya condición se cumple con
+datos limpios, no se aplica. Quien lea esto en seis meses merece saber por qué.
+
+**Qué decía.** ADR-0001 D5 pre-autorizó: *"si la verificación V1 (10 min de audio en español) confirma
+menos de 3× tiempo real, el modelo por defecto pasa a `base`, sin ADR nuevo"*.
+
+**Su condición se cumple.** V1 limpia da **1,725×**, muy por debajo de 3×. No hay excusa de contaminación:
+la medición trae evidencia de sistema antes y después de cada corrida.
+
+**Y aun así no se dispara. Cuatro razones, en orden de peso:**
+
+1. **La premisa que la sostenía murió.** Se escribió cuando el marco era un **techo de peso** y su función
+   era proteger contra un valor por defecto tan lento que fuera inservible. Después el dueño declaró la
+   **calidad de texto como criterio único** y el techo como orientativo. En ese marco, la cláusula hace lo
+   contrario de lo que se le pide al producto: **cambia calidad por velocidad**.
+2. **Su umbral no era evidencia, era un eco de una estimación equivocada.** El "3×" salió de mi
+   estimación original de 4-7×, que resultó ser **4-6× optimista**. Un umbral anclado a una cifra falsa no
+   puede gobernar una decisión de producto.
+3. **Ya existe el mecanismo correcto, y da el mismo resultado por el motivo correcto.** El **filtro de
+   viabilidad** (E2, suelo 1,0×) es lo que protege hoy al usuario de un valor por defecto inservible. Con
+   1,725×, `small` **pasa** el filtro; y entre los candidatos viables en CPU es el de más calidad. La
+   recomendación es `small` **por ser el mejor de los que se pueden usar**, no por sobrevivir a un umbral.
+4. **Dispararla habría empeorado el producto sin comprar nada.** Habría puesto `base` —peor calidad— cuando
+   `small` ya supera el suelo de usabilidad. La velocidad extra de `base` no resuelve ningún problema que
+   el usuario tenga.
+
+**Decisión (E14): la cláusula queda RETIRADA, no suspendida.** Este ADR supersede D5 completo, así que su
+cláusula condicional muere con él. **No queda ninguna regla automática que pueda cambiar el modelo por
+defecto sin una decisión explícita.** Si en el futuro se quiere degradar el modelo por lentitud, hace falta
+un ADR que lo argumente contra el criterio de calidad del dueño.
+
+### 8.6 Reconciliación de la línea base de CPU — y si eso rompe las conclusiones de GPU
+
+**El problema, detectado por el verificador por iniciativa propia:** su control en inglés dio **1,534×**
+(618 s del vídeo del dueño, con evidencia de aislamiento) frente al **1,15×** que
+[`SPIKE-GPU-RESULTS.md`](../../apps/Voice2Text/SPIKE-GPU-RESULTS.md) reporta para `small`/CPU (360 s **de
+la misma fuente**, sin evidencia de aislamiento y con otros agentes activos en la máquina).
+
+**Cuál es la buena: la de 1,534×.** No por ser más nueva, sino porque **es la única de las dos que
+documenta que la máquina estaba libre** (`tasklist` sin `python.exe` competidor y carga de CPU al 5-7 %
+antes y después). La del spike se marca **provisional**, no se borra.
+
+**Magnitud del desvío:** 1,534 / 1,15 = **1,33**. La base de CPU del spike era ~33 % pesimista.
+
+**¿Rompe eso los factores de mejora de la GPU? Es la pregunta correcta, porque las mejoras son un
+cociente y la base está en el denominador.** El análisis honesto tiene dos extremos, y la verdad está
+entre ellos:
+
+| Escenario | Supuesto | `small` | `medium` | `turbo` |
+|---|---|---:|---:|---:|
+| **A** — las corridas de GPU estaban **igual de contaminadas** | el cociente se autocorrige | 6,9× | 12,4× | 20,7× |
+| **B** — solo las de CPU estaban contaminadas | se divide todo por 1,33 | **5,2×** | **9,3×** | **15,5×** |
+
+El escenario real está entre A y B, porque **la ruta de GPU también consume CPU** (decodificación del
+audio, VAD, espectrograma, tokenización), así que la contención la afectaba también, aunque en menor
+proporción.
+
+**Conclusión, y es lo único que hace falta decidir: la decisión aguanta, las cifras no.**
+
+- **E4 (aprobar la GPU) se sostiene en el peor escenario**: incluso 5,2× está **1,7 veces por encima** del
+  umbral de 3× que se fijó antes de medir. **No se reabre nada.**
+- **La recomendación por perfil (§3) también aguanta**: con la corrección optimista, `medium` pasa de
+  0,30× a ~0,40× y `turbo` de 0,34× a ~0,45×. **Los dos siguen por debajo del suelo de viabilidad de
+  1,0×**, así que `small` sigue siendo el recomendado en CPU. El resultado no cambia.
+- **Lo que sí cambia: las cifras publicables.** Ninguna mejora de GPU se publica como un número exacto
+  hasta que se remida con aislamiento (**V8**). Se publican como **horquilla** o no se publican.
+
+**Y una lección que este proyecto ya ha pagado dos veces** (E15): en una máquina donde trabajan varios
+agentes en paralelo, **una medición de rendimiento sin evidencia de aislamiento no es un dato, es una
+anécdota**. El primer intento de V1 dio 0,93× y era pura contención; la línea base de CPU del spike de GPU
+era 33 % pesimista por lo mismo. La comprobación cuesta dos comandos antes y dos después.
+
+### 8.7 El estado observable lleva el RESULTADO, nunca la intención
+
+**Incidente del 2026-08-10, con E9 y E10 ya escritas y aun así violadas.** Se pidió GPU explícitamente, la
+transcripción corrió en CPU y **no se avisó**. El motor hacía su parte bien —registraba la caída y su
+motivo— y **nadie leía ese registro**: dos capas guardaban lo que se *iba a intentar* y descartaban lo que
+*pasó*.
+
+**Lo peligroso no fue el fallo, fue la asimetría.** El `.md` exportado sí llevaba el dato correcto; **solo
+mentía el estado en vivo** — precisamente el que la interfaz consulta mientras el usuario espera, y el que
+`GET /health` sirve al bot. Un indicador "GPU activa" habría sido falso **exactamente en el caso que la
+regla existe para prevenir**.
+
+**Principio, que aplica a todo el contrato y no solo a la GPU:**
+
+> **Cuando una decisión puede revisarse en ejecución, el estado observable se actualiza con el RESULTADO,
+> nunca se queda con la INTENCIÓN.** Y si un mismo hecho tiene dos representaciones —estado en vivo y
+> artefacto persistido—, salen de **una sola fuente**. Cuando divergen, la que miente es siempre la que
+> alguien está mirando en tiempo real.
+
+**Por qué pasó, en una línea que sirve para no repetirlo:** aquí el dispositivo se decide en **dos**
+momentos —`resolve_device()` dice qué se va a intentar y la prueba de humo dentro de `load_model()` puede
+desmentirlo—, y **el estado se escribía en el primero**. Con dos momentos de decisión, el estado se escribe
+**siempre en el último**.
+
+**Cómo se hace cumplir** (`ARCHITECTURE.md` §4.2): `job.device_used` se escribe **después** de que
+`load_model()` devuelva, a partir del `DeviceChoice` realmente usado tras la prueba de humo, **jamás** a
+partir de la salida de `resolve_device()`. Un único escritor. Y hay un caso de prueba obligatorio que
+fuerza la caída y comprueba que **el estado en vivo la refleja**, no solo el archivo exportado.
+
 ### 8.4 La unidad se publica en minutos, no en "×" — y por qué
 
 **Incidente del 2026-08-10, detectado al revisar un mensaje al dueño.** La convención de estos documentos
@@ -310,7 +441,8 @@ respaldo. **Afecta a `transcribe.py`, ya commiteado** (§9).
 |---|---|
 | **~2,0-2,1 GB [M-dev]** para quien instale la GPU | Opcional, aparte, con `uninstall-gpu.ps1` y los dos números delante |
 | **El camino GPU no es autocontenido** — segunda grieta en la regla de oro, tras yt-dlp | Se declara en el README con las mismas palabras que se hizo con yt-dlp. La instalación base **sí** lo es |
-| **`small`/CPU son ~8,7 min por cada 10 de audio** [M-dev] | Se publica esa cifra, no una mejor. Es el argumento honesto para el complemento de GPU |
+| **`small`/CPU son 5,80 min (es) / 6,52 min (en) por cada 10 de audio** [M-dev, con aislamiento] | Se publican las dos, medidas, sin redondear a la baja. Es el argumento honesto para el complemento de GPU |
+| **En CPU hay un techo de calidad que `small` puede no alcanzar** | V1 observó, **con voz sintética limpia y sin ruido**, errores en lo que más duele: `"40 y 5 minutos"` por *45 minutos*, `"90% y un por ciento"` por *91 %*, una palabra mal oída y un fragmento perdido en un límite de segmento. **Con habla humana real serán más, no menos.** El filtro de viabilidad bloquea cualquier modelo mejor en CPU, así que **la única salida real para calidad es el complemento de GPU.** Se dice en el README, no se descubre usándolo |
 | El acoplamiento `ctranslate2` × cuDNN puede romper en ejecución [O] | E6: se fijan juntos. `gpu_libraries_missing` con mensaje accionable |
 | **Cambio en `transcribe.py`, ya commiteado**: imports perezosos y firma de capacidades | Aditivo, unas pocas líneas. Detalle en §11 |
 | `medium`/`float32` quedó sin concluir | No es decisivo: `medium` se recomienda en `int8`, y la variante `float32` queda **excluida por la regla de holgura**, que es el resultado correcto sin necesidad del dato |
@@ -322,7 +454,10 @@ respaldo. **Afecta a `transcribe.py`, ya commiteado** (§9).
 
 | # | Qué | Estado | Consecuencia si falla |
 |---|---|---|---|
-| **V1 / S11** | Velocidad y detección de idioma con **10 min de audio en español** | **DESBLOQUEADO (2026-08-10)** — el dueño instaló `Microsoft Sabina Desktop` (`es-MX`), **verificada visible para `System.Speech.Synthesis`** con `GetInstalledVoices()`, no de palabra: muchas voces de Windows se instalan solo para el Narrador y SAPI no las ve. En ejecución; entrega en `VERIF-ESPANOL.md` | Afina la cifra publicada; **no cambia el modelo recomendado**. El dialecto `es-MX` es irrelevante para las dos: Whisper detecta `es` sin distinguir variante, y el coste de proceso no depende del acento |
+| **V1** | Velocidad con 10 min de audio en español | **CERRADO EN VERDE (2026-08-10)** | **1,725× = 5,80 min/10min en español; 1,534× = 6,52 min/10min en inglés**, con evidencia de aislamiento. **El español no es más lento que el inglés**: salió ~11 % más rápido. La cifra de 0,93× del primer intento era contención de CPU, no idioma |
+| **S11** | Detección automática de idioma | **CERRADO EN VERDE** | 4/4 correctas, probabilidad ≥ 99,5 %, segundo candidato tres órdenes de magnitud por detrás. `language: null` se confirma como valor por defecto |
+| **V8** | **Remedir la línea base de CPU de `medium` y `turbo`, y las corridas de GPU, con evidencia de aislamiento** | **ABIERTO** | Nace de §8.6. **No puede cambiar la decisión de aprobar la GPU** (aguanta en el peor escenario), solo las cifras que se publican. Hasta entonces, las mejoras se publican como **horquilla** |
+| **V9** | Umbral de `language_probability` bajo el que avisar al usuario | **ABIERTO** | La voz sintética nunca bajó de 99,5 %, así que el 0,75 propuesto **no está verificado**. Necesita audio con acento, ruido o cambio de idioma |
 | **V2 / V3 / V4** | Marcas de tiempo y `word_timestamps` (lote 1.b) | en curso | Independientes de este ADR |
 | **V5** | ¿`get_supported_compute_types('cuda',0)` funciona **sin** las DLL de CUDA? | **ABIERTO** | Si da un falso positivo, el estado `"probable"` se apoya solo en la existencia de los ficheros DLL en disco — que ya está en el contrato por si acaso |
 | **V6** | **Calidad real en español e inglés** de `turbo` frente a `large-v3` sobre el mismo audio | **SIGUE BLOQUEADO** — y la voz española **no lo desbloquea**: ver el recuadro de abajo | Es el punto 3 del desempate de §4 y la única forma de saldar la deuda del orden de calidad |

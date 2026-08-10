@@ -19,6 +19,7 @@ pedir permiso ni dar atribución.
 | [BrandAssets](apps/BrandAssets/) | De un PNG de 1024×1024 saca todos los iconos e imágenes de una PWA (favicons, *maskable*, `apple-touch-icon`, `og-image.jpg` y el `manifest.webmanifest`). Interfaz web local, previsualización antes de exportar. |
 | [Mermaid](apps/Mermaid/) | Editor gráfico de diagramas de flujo: arrastras formas, las unes con flechas y el código Mermaid se genera en tiempo real. Vista previa y exportación a `.mmd` / `.svg` / `.png`. Funciona sin internet. |
 | [MDViewer](apps/MDViewer/) | Visor de archivos `.md`: doble clic y se abren al instante, con el mismo formato que se ven en GitHub. Solo lectura, botón para exportar a PDF y recarga en vivo al editar. Se asocia solo la primera vez que lo ejecutas. |
+| [Voice2Text](apps/Voice2Text/) | Transcribe audio y vídeo a texto en tu propio equipo, sin nube: arrastra un archivo o pega un enlace y obtienes `.txt` y `.md` con marcas de tiempo. Modo ventana (uso normal) o modo servidor (para que otra app la consuma). Complemento de GPU opcional. |
 
 *(Se irán añadiendo más.)*
 
@@ -102,12 +103,25 @@ BSTools/
     │   ├── vendor/mermaid.min.js
     │   ├── graphs/            diagramas guardados (locales, en .gitignore)
     │   └── README.md
-    └── MDViewer/
-        ├── MDViewer.exe       sin instalador: se asocia solo al ejecutarlo
-        ├── *.dll              motor de render WebView2
-        ├── build.ps1          recompila el .exe (solo desarrollo)
-        ├── src/MDViewer.cs
-        ├── assets/viewer.html
+    ├── MDViewer/
+    │   ├── MDViewer.exe       sin instalador: se asocia solo al ejecutarlo
+    │   ├── *.dll              motor de render WebView2
+    │   ├── build.ps1          recompila el .exe (solo desarrollo)
+    │   ├── src/MDViewer.cs
+    │   ├── assets/viewer.html
+    │   └── README.md
+    └── Voice2Text/
+        ├── install.ps1        + install-gpu.ps1 (complemento opcional de GPU)
+        ├── uninstall.ps1      + uninstall-gpu.ps1
+        ├── Voice2Text.cmd     modo ventana
+        ├── Voice2Text-Servidor.cmd   modo servidor (--serve)
+        ├── app.py / serve.py / cli.py     las tres cáscaras
+        ├── jobs.py            orquestación: cola, estado, cerrojo, modelo en RAM
+        ├── transcribe.py / models.py / fetch.py / export.py     el motor
+        ├── catalog.py / errors.py     hojas: datos y códigos, sin imports
+        ├── ui.html
+        ├── requirements.txt   + requirements-gpu.txt
+        ├── ARCHITECTURE.md
         └── README.md
 ```
 

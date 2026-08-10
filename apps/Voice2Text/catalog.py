@@ -61,11 +61,13 @@ CATALOG: dict[str, ModelSpec] = {
         params_millions=244,
         quality_rank=4,
         vram_peak_mb={"int8": 1314, "float32": 2032},  # tope de los rangos medidos
-        speed_ratio={"cpu_int8": 1.15, "cuda_int8": 7.94},  # ADR-0002 Sec.3 [M-dev]
-        # OJO: ADR-0002 Sec.8.6 desautorizo el 1.15 de CPU (contaminado por
-        # contencion) y dejo 1.534x(en)/1.725x(es) como la medicion limpia. No se
-        # actualiza aqui -- fuera del alcance del lote 8, que solo mueve la tabla
-        # de sitio -- pero cualquiera que toque este numero debe leer esa seccion.
+        # ADR-0002 Sec.3/Sec.8.6: el 1.15 (spike, sin evidencia de aislamiento)
+        # queda RETIRADO -- estaba contaminado por contencion de CPU. Va el
+        # 1.534 (ingles, habla humana real), el mas conservador de las dos
+        # mediciones limpias (1.534 en / 1.725 es): alimenta
+        # `estimated_wait_seconds` y una espera nunca se promete mejor de lo
+        # que se entrega (ADR-0002, "Que valor exacto va en catalog.py").
+        speed_ratio={"cpu_int8": 1.534, "cuda_int8": 7.94},  # ADR-0002 Sec.3 [M-dev]
     ),
     "medium": ModelSpec(
         model_id="medium",
@@ -79,7 +81,11 @@ CATALOG: dict[str, ModelSpec] = {
         # el tope del rango a proposito: la holgura ABSOLUTA de 512 MiB de
         # `resolve_device()` lo excluye sola, sin necesidad de omitir la clave.
         vram_peak_mb={"int8": 2416, "float32": 3927},
-        speed_ratio={"cpu_int8": 0.30, "cuda_int8": 3.73},
+        # ADR-0002 Sec.3: reescalado desde el 0.30 contaminado, en la misma
+        # proporcion que `small` (1.534/1.15 = 1.33x). Sigue marcado [E] y
+        # sigue por debajo del suelo de viabilidad de 1.0x: no cambia ninguna
+        # decision, solo dejar de inflar `estimated_wait_seconds`.
+        speed_ratio={"cpu_int8": 0.40, "cuda_int8": 3.73},
     ),
     "large-v3-turbo": ModelSpec(
         model_id="large-v3-turbo",
@@ -90,7 +96,9 @@ CATALOG: dict[str, ModelSpec] = {
         params_millions=809,
         quality_rank=2,  # [E]
         vram_peak_mb={"int8": 1575},
-        speed_ratio={"cpu_int8": 0.34, "cuda_int8": 7.05},
+        # ADR-0002 Sec.3: reescalado desde el 0.34 contaminado, misma
+        # proporcion que `small`. Sigue [E] y sigue bajo el suelo de 1.0x.
+        speed_ratio={"cpu_int8": 0.45, "cuda_int8": 7.05},
     ),
     "large-v3": ModelSpec(
         model_id="large-v3",

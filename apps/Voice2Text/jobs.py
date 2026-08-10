@@ -93,6 +93,28 @@ def _probe_duration_seconds(media_path: Path) -> Optional[float]:
         return None
 
 
+def _has_audio_stream(media_path: Path) -> bool:
+    """Valida barato -- SOLO la cabecera del contenedor, NUNCA decodifica -- que
+    haya al menos un stream de audio. Es la validacion sincrona que el encargo
+    del 2026-08-10 exige mover a `submit_transcription()`: antes solo la
+    llamaba la ventana (`app.py::Api.probe_media`, antes de dejar pulsar
+    "Transcribir"), y la API aceptaba el mismo archivo con `202`, cargaba un
+    modelo de hasta 3 GB, y solo entonces fallaba con `NO_AUDIO_STREAM` -- justo
+    lo que "validacion barata SINCRONA, trabajo ASINCRONO" (ARCHITECTURE.md
+    Sec.3) prohibe.
+
+    Si el contenedor ni se puede abrir, esta funcion NO es quien lo diagnostica
+    (eso es `DECODE_FAILED`, y sale mas barato dejar que lo detecte el motor al
+    decodificar de verdad): se devuelve `True` para no bloquear el encolado por
+    un motivo que esta comprobacion no sabe distinguir sin decodificar.
+    """
+    try:
+        with av.open(str(media_path)) as container:
+            return len(container.streams.audio) > 0
+    except Exception:
+        return True
+
+
 def _segment_to_dict(segment: "transcribe.Segment") -> dict[str, Any]:
     return {
         "index": segment.index,
@@ -366,9 +388,17 @@ class JobManager:
         """`source = {"kind": "file", "path": "..."}` o `{"kind": "url", "url": "..."}`.
 
         Validacion barata y SINCRONA antes de encolar (ARCHITECTURE.md Sec.3): un
-        archivo que no existe, un esquema que no es http/https, o un origen sin
-        `player_clients` fallan aqui mismo -- nunca tras minutos de descarga o
-        transcripcion. Devuelve `(job_id, queue_position)`.
+        archivo que no existe, un archivo sin pista de audio, un esquema que no
+        es http/https, o un origen sin `player_clients` fallan aqui mismo --
+        nunca tras minutos de descarga o transcripcion. Devuelve `(job_id,
+        queue_position)`.
+
+        La comprobacion de audio es SOLO para `kind="file"` (encargo del
+        2026-08-10): un enlace no se puede validar sin descargarlo primero, y
+        descargar no es "barato" -- validarlo aqui reintroduciria justo el
+        costo que esta funcion existe para evitar. `fetch.fetch_audio()` ya
+        confirma con PyAV, tras la descarga, que el archivo que bajo tiene
+        audio (`_resolve_media_path`, mas abajo).
         """
         kind = source.get("kind")
         if kind not in ("file", "url"):
@@ -384,6 +414,8 @@ class JobManager:
             media_path = Path(source["path"]).resolve()
             if not media_path.is_file():
                 raise CoreError(ErrorCode.FILE_NOT_FOUND, details={"path": str(media_path)}, technical="")
+            if not _has_audio_stream(media_path):
+                raise CoreError(ErrorCode.NO_AUDIO_STREAM, details={"path": str(media_path)}, technical="")
             if normalized_options["output_dir"] is None:
                 normalized_options["output_dir"] = str(media_path.parent)
 
