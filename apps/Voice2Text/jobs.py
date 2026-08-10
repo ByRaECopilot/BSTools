@@ -1,12 +1,19 @@
 """ORQUESTACION: cola FIFO, estado, cancelacion, cerrojo de proceso, modelo en RAM.
 
-Vive entre la cascara (que no existe todavia: `app.py` es lote 3, `serve.py` es
-lote 6) y el motor (`transcribe.py`, `models.py`, `export.py`). A diferencia del
-motor, este archivo SI tiene estado (la cola, el modelo cargado, los trabajos) y
-SI puede usar hilos -- eso es exactamente lo que ARCHITECTURE.md Sec.2 le asigna.
-Lo que sigue prohibido aqui, igual que en el motor: nada de `webview`, nada de
-`http.server`, nada de texto en castellano (D10/D12) -- eso es trabajo exclusivo
-de `messages.py` en la cascara, que este archivo ni conoce.
+Vive entre la cascara (`app.py`, lote 3, todavia no existe; `serve.py`, lote 6,
+ya lo consume) y el motor (`transcribe.py`, `models.py`, `export.py`). A
+diferencia del motor, este archivo SI tiene estado (la cola, el modelo cargado,
+los trabajos) y SI puede usar hilos -- eso es exactamente lo que
+ARCHITECTURE.md Sec.2 le asigna. Lo que sigue prohibido aqui, igual que en el
+motor: nada de `webview`, nada de `http.server`, nada de texto en castellano
+(D10/D12) -- eso es trabajo exclusivo de `messages.py` en la cascara, que este
+archivo ni conoce.
+
+Lote 6: tres metodos de solo lectura/limpieza (`running_job_id`, `loaded_model`,
+`forget_job`) se anadieron para que `serve.py` pudiera exponer `/health` y
+`DELETE /api/v1/jobs/{job_id}` sin leer los atributos privados de
+`JobManager` desde fuera. Son lectura de estado y limpieza de la cola, no
+logica nueva: no reimplementan nada que ya estuviera aqui.
 
 Decision de diseno que no esta escrita literalmente en ARCHITECTURE.md y que hay
 que dejar explicita para que nadie la lea como un descuido: **un trabajo de
@@ -415,6 +422,23 @@ class JobManager:
         with self._lock:
             return list(self._jobs.keys())
 
+    def running_job_id(self) -> Optional[str]:
+        """El `job_id` en ejecucion ahora mismo, o `None` (lote 6: lo usa `serve.py`
+        para cancelar el trabajo en curso al apagar, ARCHITECTURE.md Sec.6.2/D15).
+        """
+        with self._lock:
+            return self._running_job_id
+
+    def loaded_model(self) -> Optional[dict[str, Any]]:
+        """Que modelo (si alguno) esta cargado en RAM ahora mismo (D22). Lote 6:
+        lo consume `GET /api/v1/health` (ARCHITECTURE.md Sec.6.3).
+        """
+        with self._lock:
+            if self._loaded_model_key is None:
+                return None
+            model_id, device, compute_type = self._loaded_model_key
+            return {"model_id": model_id, "device": device, "compute_type": compute_type}
+
     def _queue_position_locked(self, job_id: str) -> int:
         if job_id == self._running_job_id:
             return 0
@@ -452,9 +476,15 @@ class JobManager:
         return total
 
     def _likely_device(self, model_id: Optional[str], preference: str) -> str:
+        spec = models.CATALOG.get(model_id) if model_id else None
+        if spec is None:
+            # Lote 8: resolve_device() ahora recibe un ModelSpec (ARCHITECTURE.md
+            # Sec.3), no un model_id. Sin uno valido no hay nada que resolver --
+            # mismo resultado conservador que antes (VRAM desconocida -> CPU).
+            return "cpu"
         try:
             caps = transcribe.probe_devices()
-            return transcribe.resolve_device(model_id or "", caps, preference=preference).device
+            return transcribe.resolve_device(spec, caps, preference=preference).device
         except Exception:
             return "cpu"
 
@@ -483,6 +513,23 @@ class JobManager:
             # es sub-segundo en descarga de modelo (models.py, medido en el lote 2).
             job._cancel_event.set()
             return True
+
+    def forget_job(self, job_id: str) -> None:
+        """Quita el trabajo del mapa de estado y purga sus temporales de `work/`
+        (lote 6: `DELETE /api/v1/jobs/{job_id}`, ARCHITECTURE.md Sec.5.4/6.3).
+
+        No cancela por su cuenta: un trabajo `queued` o `running` se rechaza con
+        `ValueError` -- primero se cancela (`cancel_job`), luego se olvida. Mismo
+        patron que `cancel_job()`: valida bajo `self._lock`, hace la E/S fuera.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if job.state in ("queued", "running"):
+                raise ValueError(f"job {job_id!r} sigue {job.state}; cancelalo antes de olvidarlo")
+            del self._jobs[job_id]
+        _purge_job_work_files(self._work_dir, job_id)
 
     # ------------------------------------------------------------------ trabajador
 
@@ -681,7 +728,14 @@ class JobManager:
         modelo anterior antes de cargar el nuevo: nunca dos modelos vivos (D22).
         """
         caps = transcribe.probe_devices()
-        choice = transcribe.resolve_device(model_id, caps, preference=device_preference)
+        # Lote 8: resolve_device() recibe el ModelSpec del catalogo, no el model_id
+        # (ARCHITECTURE.md Sec.3). Un model_id que no existe en CATALOG termina
+        # igualmente en CoreError(MODEL_MISSING) mas abajo, en transcribe.load_model().
+        spec = models.CATALOG.get(model_id, models.ModelSpec(
+            model_id=model_id, repo_id="", expected_bytes=0, params_millions=0,
+            quality_rank=0, vram_peak_mb={}, speed_ratio={},
+        ))
+        choice = transcribe.resolve_device(spec, caps, preference=device_preference)
         key = (model_id, choice.device, choice.compute_type)
 
         with self._lock:

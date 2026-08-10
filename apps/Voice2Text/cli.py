@@ -30,6 +30,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from catalog import CATALOG
 from errors import CoreError
 import export
 import transcribe
@@ -92,6 +93,11 @@ def _self_check(args: argparse.Namespace) -> int:
     _print("Voice2Text - autochequeo de GPU (ADR-0002 Sec.6 / ARCHITECTURE.md Sec.14)")
     _print("")
 
+    spec = CATALOG.get(args.model_id)
+    if spec is None:
+        _print(f"ERROR: model-id desconocido: {args.model_id!r}")
+        return 2
+
     caps = transcribe.probe_devices()
     _print(f"  cuda_status: {caps.cuda_status}")
     _print(f"  gpu: {caps.gpu_name or '(ninguna detectada)'}")
@@ -108,7 +114,7 @@ def _self_check(args: argparse.Namespace) -> int:
         _print(f"RESULTADO: sin GPU utilizable ({caps.unavailable_reason}). Se sigue usando CPU.")
         return 1
 
-    device_choice = transcribe.resolve_device(args.model_id, caps, preference="cuda")
+    device_choice = transcribe.resolve_device(spec, caps, preference="cuda")
     _print(f"  resolve_device(model_id={args.model_id!r}): device={device_choice.device} compute_type={device_choice.compute_type}")
     if device_choice.device != "cuda":
         _print("")
@@ -157,6 +163,11 @@ def main(argv: list[str] | None = None) -> int:
         _print("ERROR: falta la ruta del archivo (o usa --self-check).")
         return 2
 
+    spec = CATALOG.get(args.model_id)
+    if spec is None:
+        _print(f"ERROR: model-id desconocido: {args.model_id!r}")
+        return 2
+
     media_path = args.media_path.resolve()
     output_dir = (args.output_dir or media_path.parent).resolve()
     formats = [item.strip() for item in args.formats.split(",") if item.strip()]
@@ -164,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
     # Resolucion de dispositivo (ARCHITECTURE.md Sec.3): la cascara solo pide una
     # preferencia; la politica vive entera en transcribe.resolve_device().
     caps = transcribe.probe_devices()
-    device_choice = transcribe.resolve_device(args.model_id, caps, preference=args.device_preference)
+    device_choice = transcribe.resolve_device(spec, caps, preference=args.device_preference)
     if args.compute_type:
         device_choice = dataclasses.replace(device_choice, compute_type=args.compute_type)
     if args.cpu_threads is not None:

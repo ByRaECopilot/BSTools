@@ -21,6 +21,19 @@ Tres reglas que gobiernan este archivo y no son negociables:
 3. **La holgura de VRAM es 512 MiB ABSOLUTOS, nunca un porcentaje** (ADR-0002 Sec.7):
    quedarse justo por debajo del limite es peor que pasarse -- pasarse da un
    `CUDA out of memory` capturable, quedarse al borde no da nada que capturar.
+
+Lote 8 (ARCHITECTURE.md Sec.3, "Donde vive esto"): `ModelSpec` y `CATALOG` se
+extraen a `catalog.py`, una HOJA sin comportamiento. Este archivo importa
+`catalog.py` -- NUNCA `models.py` -- porque la direccion de esa dependencia es la
+que evita el ciclo (`models.py` conoce el layout de cache que `load_model()`
+consume; si `transcribe.py` importara `models.py`, la dependencia se invertiria).
+`resolve_device()` recibe un `ModelSpec` en vez de un `model_id`: asi no busca en
+ningun catalogo y sigue siendo una funcion PURA de sus argumentos.
+`recommend_profile()` y `ModelRecommendation` viven aqui, junto a `resolve_device()`:
+son la misma politica de ADR-0001 Sec.17.2 a dos granularidades (que modelo / que
+dispositivo) -- **sugerir nunca es descargar** (ADR-0002): un trabajo de
+transcripcion jamas dispara una descarga por su cuenta (`allow_download=False`
+siempre, blindado desde el lote 2).
 """
 from __future__ import annotations
 
@@ -34,6 +47,7 @@ from typing import Callable, Optional
 
 import av
 
+from catalog import ModelSpec
 from errors import CoreError, ErrorCode, one_line
 
 logger = logging.getLogger(__name__)
@@ -110,29 +124,15 @@ _CPU_COMPUTE_ORDER = (_CPU_COMPUTE_TYPE, "float32")
 
 _VRAM_SLACK_MB = 512  # holgura ABSOLUTA (ADR-0002 Sec.7), nunca un porcentaje
 
+# Suelo de viabilidad de `recommend_profile()` (ADR-0002 E2): un candidato con
+# `speed_ratio` estimado por debajo de esto no se recomienda -- correria mas lento
+# que el propio audio.
+_MIN_VIABLE_SPEED_RATIO = 1.0
+
 # Subcarpetas de site-packages/nvidia/ que pip crea al instalar requirements-gpu.txt.
 # Deben coincidir con los paquetes fijados ahi (ADR-0002 E6): cublas, cudnn y la
 # transitiva cuda_nvrtc que pip trae sin que nadie la pida.
 _CUDA_DLL_SUBDIRS = ("cublas", "cudnn", "cuda_nvrtc")
-
-# Catalogo PROVISIONAL de picos de VRAM medidos [M-dev] (ADR-0002 Sec.3,
-# SPIKE-GPU-RESULTS.md Sec.4). VIVE AQUI, no en models.py, porque el lote 2
-# (models.py / ModelSpec / CATALOG completo) todavia no existe -- ARCHITECTURE.md
-# Sec.13 lo marca "pendiente". Es deuda declarada, a propósito: cuando el lote 2
-# aterrice, esta tabla debe fundirse en `ModelSpec.vram_peak_mb` y desaparecer de
-# aqui para no tener dos fuentes de verdad. Los huecos (p.ej. "small"/float16, o
-# cualquier cosa en la RTX 3080) son deliberados: sin medicion real, resolve_device()
-# descarta el candidato en vez de asumir que cabe (ver `_gpu_vram_peak_mb`).
-_GPU_VRAM_PEAK_MB: dict[str, dict[str, int]] = {
-    "small": {"int8": 1314, "float32": 2032},
-    # "medium"/float32 quedo NO CONCLUYENTE (degradacion silenciosa sin excepcion,
-    # SPIKE-GPU-RESULTS.md Sec.4): se omite a proposito, nunca se asume que cabe.
-    "medium": {"int8": 2416},
-    "large-v3-turbo": {"int8": 1575},
-    # large-v3/int8 remato en CUDA out of memory a 3951 MiB: se deja en la tabla
-    # para que la holgura de VRAM lo siga descartando en tarjetas pequenas.
-    "large-v3": {"int8": 3951},
-}
 
 
 def add_cuda_dlls_to_path() -> list[Path]:
@@ -293,19 +293,15 @@ def probe_devices() -> DeviceCapabilities:
     )
 
 
-def _gpu_vram_peak_mb(model_id: str, compute_type: str) -> Optional[int]:
-    """Pico de VRAM medido para (modelo, compute_type), o None si no hay medicion.
-
-    Sin medicion, `resolve_device()` DESCARTA el candidato -- nunca asume que cabe
-    (ADR-0002 Sec.7: quedarse al borde es peor que un OOM limpio).
-    """
-    return _GPU_VRAM_PEAK_MB.get(model_id, {}).get(compute_type)
-
-
 def _pick_gpu_compute_type(
-    model_id: str, caps: DeviceCapabilities, override: Optional[str]
+    spec: ModelSpec, caps: DeviceCapabilities, override: Optional[str]
 ) -> Optional[str]:
-    """Primer compute_type que (a) soporta esta GPU y (b) deja >= 512 MiB libres."""
+    """Primer compute_type que (a) soporta esta GPU y (b) deja >= 512 MiB libres.
+
+    Lee el pico de VRAM directamente de `spec.vram_peak_mb` (catalog.py, lote 8):
+    sin medicion para ese compute_type, se DESCARTA el candidato -- nunca se asume
+    que cabe (ADR-0002 Sec.7: quedarse al borde es peor que un OOM limpio).
+    """
     candidates = [override] if override else list(_GPU_COMPUTE_ORDER)
 
     for compute_type in candidates:
@@ -313,7 +309,7 @@ def _pick_gpu_compute_type(
             continue
         if caps.vram_free_mb is None:
             continue
-        peak = _gpu_vram_peak_mb(model_id, compute_type)
+        peak = spec.vram_peak_mb.get(compute_type)
         if peak is None:
             continue
         if caps.vram_free_mb - peak >= _VRAM_SLACK_MB:
@@ -323,7 +319,7 @@ def _pick_gpu_compute_type(
 
 
 def resolve_device(
-    model_id: str,
+    spec: ModelSpec,
     caps: DeviceCapabilities,
     preference: str = "auto",
     compute_type_override: Optional[str] = None,
@@ -335,6 +331,9 @@ def resolve_device(
     toca hardware, solo decide a partir de `caps` -- por eso se puede probar la
     politica de una RTX 3080 desde una GTX 1050 Ti con capacidades sinteticas
     (ARCHITECTURE.md Sec.14).
+
+    Recibe el `ModelSpec` (de `catalog.py`, lote 8), no un `model_id`: asi no tiene
+    que buscar en ningun catalogo y sigue siendo pura en sus argumentos.
     """
     if preference == "cpu":
         return DeviceChoice(
@@ -349,7 +348,7 @@ def resolve_device(
     wants_gpu = preference in ("auto", "cuda")
 
     if wants_gpu and caps.cuda_status != "unavailable":
-        chosen = _pick_gpu_compute_type(model_id, caps, compute_type_override)
+        chosen = _pick_gpu_compute_type(spec, caps, compute_type_override)
         if chosen is not None:
             return DeviceChoice(
                 device="cuda",
@@ -381,6 +380,89 @@ def resolve_device(
         fell_back_from=fell_back_from,
         fallback_reason=fallback_reason,
     )
+
+
+@dataclass(frozen=True)
+class ModelRecommendation:
+    model_id: str
+    compute_type: str
+    reason: str                            # codigo estable: "best_quality_fits_vram" |
+                                            # "budget_limited" | "cpu_only"
+    estimated_speed_ratio: Optional[float]  # None si no hay medicion para ese perfil
+
+
+def _recommendation_reason(choice: DeviceChoice) -> str:
+    """Por que ESTE candidato quedo con este `DeviceChoice` (ver `recommend_profile`).
+
+    `"budget_limited"` es literalmente el presupuesto de VRAM: el candidato cayo a
+    CPU porque, con GPU presente, ningun `compute_type` dejaba la holgura de 512
+    MiB exigida (ADR-0002 Sec.7) -- no porque la GPU no exista. `"cpu_only"` cubre
+    todo lo demas: sin GPU en absoluto, o el usuario pidio CPU.
+    """
+    if choice.device == "cuda":
+        return "best_quality_fits_vram"
+    if choice.fallback_reason == "insufficient_vram":
+        return "budget_limited"
+    return "cpu_only"
+
+
+def recommend_profile(
+    caps: DeviceCapabilities, catalog: dict[str, ModelSpec]
+) -> list[ModelRecommendation]:
+    """Que modelo(s) recomendar para ESTA maquina (ARCHITECTURE.md Sec.3, ADR-0002
+    E1/E2). SUGIERE, nunca actua: no descarga nada, no carga ningun modelo. Es la
+    misma politica que `resolve_device()` a otra granularidad (que modelo, en vez
+    de que dispositivo) -- por eso viven juntas en este archivo.
+
+    1) FILTRO DE VIABILIDAD (E2): un candidato entra solo si su `speed_ratio`
+       estimado (para el `DeviceChoice` que le tocaria via `resolve_device()`, que
+       ya aplica la holgura de VRAM de Sec.7) es >= `_MIN_VIABLE_SPEED_RATIO`.
+       Sin medicion para ese `(device, compute_type)`, el candidato NO pasa --
+       mismo criterio conservador que la VRAM: nunca se afirma lo que no se midio.
+       Si NINGUNO pasa, se devuelve el mas rapido disponible -- nunca lista vacia.
+    2) ORDEN por calidad (`quality_rank` ascendente, 1 = mejor); a igualdad, por
+       velocidad (mayor primero); a igualdad de ambas, por peso (`expected_bytes`
+       ascendente).
+
+    Recomendar NO es resolver un dispositivo: esta funcion nunca dispara una
+    descarga (esa es una decision de usuario, ADR-0001 D4/Sec.8); `resolve_device()`
+    sigue siendo la unica que corre por trabajo, sobre un modelo ya elegido y ya
+    descargado.
+    """
+    scored: list[tuple[ModelSpec, DeviceChoice, Optional[float]]] = []
+    for spec in catalog.values():
+        choice = resolve_device(spec, caps, preference="auto")
+        estimated_speed_ratio = spec.speed_ratio.get(f"{choice.device}_{choice.compute_type}")
+        scored.append((spec, choice, estimated_speed_ratio))
+
+    viable = [
+        item for item in scored
+        if item[2] is not None and item[2] >= _MIN_VIABLE_SPEED_RATIO
+    ]
+
+    if not viable:
+        # Nunca una lista vacia (ADR-0002 E2): se ofrece el mas rapido, aunque
+        # ninguno supere el suelo de viabilidad.
+        spec, choice, ratio = max(scored, key=lambda item: item[2] if item[2] is not None else -1.0)
+        return [
+            ModelRecommendation(
+                model_id=spec.model_id,
+                compute_type=choice.compute_type,
+                reason=_recommendation_reason(choice),
+                estimated_speed_ratio=ratio,
+            )
+        ]
+
+    viable.sort(key=lambda item: (item[0].quality_rank, -item[2], item[0].expected_bytes))
+    return [
+        ModelRecommendation(
+            model_id=spec.model_id,
+            compute_type=choice.compute_type,
+            reason=_recommendation_reason(choice),
+            estimated_speed_ratio=ratio,
+        )
+        for spec, choice, ratio in viable
+    ]
 
 
 def smoke_test_cuda(model: object) -> tuple[bool, Optional[str]]:

@@ -47,12 +47,12 @@ import logging
 import shutil
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
 from huggingface_hub import HfApi, hf_hub_url
 
+from catalog import CATALOG, ModelSpec  # noqa: F401 -- re-exportado, API publica sin cambios
 from errors import CoreError, ErrorCode, one_line
 
 logger = logging.getLogger(__name__)
@@ -68,85 +68,10 @@ _DISK_HEADROOM_FACTOR = 1.2  # ARCHITECTURE.md Sec.5 / Sec.11: necesario * 1.2 l
 _USER_AGENT = "Voice2Text/1 (BSTools; +https://www.byraesoftware.com)"
 
 
-@dataclass(frozen=True)
-class ModelSpec:
-    model_id: str            # "small"
-    repo_id: str              # "Systran/faster-whisper-small"
-    expected_bytes: int       # tamano de descarga anunciado como PLAN B si el Hub
-                               # no responde (ver `_resolve_download_plan`); el
-                               # numero real y medido en el momento manda siempre
-                               # que el Hub esta disponible
-    params_millions: int
-    quality_rank: int                  # 1 = mejor. ORDINAL y [E] (ADR-0002 Sec.3):
-                                        # nunca se ha medido calidad en espanol
-    vram_peak_mb: dict[str, int]       # por compute_type, medido donde exista
-                                        # (ADR-0002 Sec.3 y Sec.7). Vacio = sin medir
-    speed_ratio: dict[str, float]      # clave "{device}_{compute_type}", medido
-                                        # donde exista (ADR-0002 Sec.3)
-
-
-# Cifras y repos: ADR-0002 Sec.3 y Sec.6 (tabla de catalogo y de velocidad),
-# ARCHITECTURE.md Sec.3 (nota sobre `large-v3-turbo`). `tiny`, los `.en` y las
-# variantes `distil` quedan fuera por decision de ADR-0001 D5 (solo ingles).
-#
-# `expected_bytes`: se sigue la misma convencion que ya fijo `small` (464 MB
-# medidos = 486 539 264 bytes exactos, es decir MiB, no MB decimales) para que las
-# cifras encajen con lo que ya publica ARCHITECTURE.md.
-CATALOG: dict[str, ModelSpec] = {
-    "base": ModelSpec(
-        model_id="base",
-        repo_id="Systran/faster-whisper-base",
-        expected_bytes=145 * 1024 * 1024,  # ~145 MB [E], ADR-0001 Sec.6
-        params_millions=74,
-        quality_rank=5,
-        vram_peak_mb={},       # sin medir (ADR-0002 Sec.3: "-")
-        speed_ratio={},        # sin medir en ADR-0002; ADR-0001 estimaba ~8-12x [E]
-    ),
-    "small": ModelSpec(
-        model_id="small",
-        repo_id="Systran/faster-whisper-small",
-        expected_bytes=486_539_264,  # 464 MB [M], ARCHITECTURE.md Sec.3
-        params_millions=244,
-        quality_rank=4,
-        vram_peak_mb={"int8": 1314, "float32": 2032},  # tope de los rangos medidos
-        speed_ratio={"cpu_int8": 1.15, "cuda_int8": 7.94},  # ADR-0002 Sec.3 [M-dev]
-    ),
-    "medium": ModelSpec(
-        model_id="medium",
-        repo_id="Systran/faster-whisper-medium",
-        expected_bytes=1_610_612_736,  # 1,5 GB [M-dev], ADR-0002 Sec.3
-        params_millions=769,
-        quality_rank=3,
-        # float32: "no concluyente" en ADR-0002 Sec.3, pero es EXACTAMENTE el caso
-        # de degradacion silenciosa medido en ADR-0002/ARCHITECTURE.md Sec.3
-        # (3881-3927 MiB de 4096, 13 min sin terminar ni lanzar excepcion). Se usa
-        # el tope del rango a proposito: la holgura de 512 MiB debe excluirlo.
-        vram_peak_mb={"int8": 2416, "float32": 3927},
-        speed_ratio={"cpu_int8": 0.30, "cuda_int8": 3.73},
-    ),
-    "large-v3-turbo": ModelSpec(
-        model_id="large-v3-turbo",
-        # OJO (ADR-0002 E12 / ARCHITECTURE.md Sec.3): NO tiene repo de Systran.
-        # El de referencia de facto es este, tambien en fp16 (nunca pre-cuantizado).
-        repo_id="mobiuslabsgmbh/faster-whisper-large-v3-turbo",
-        expected_bytes=1_717_986_918,  # 1,6 GB [M-dev], ADR-0002 Sec.3
-        params_millions=809,
-        quality_rank=2,  # [E]
-        vram_peak_mb={"int8": 1575},
-        speed_ratio={"cpu_int8": 0.34, "cuda_int8": 7.05},
-    ),
-    "large-v3": ModelSpec(
-        model_id="large-v3",
-        repo_id="Systran/faster-whisper-large-v3",
-        expected_bytes=3_328_599_655,  # tope del rango "~2,9-3,1 GB" [M-dev/E]
-        params_millions=1550,  # [E]: cifra publica conocida de Whisper large-v3
-        quality_rank=1,  # [E]
-        # int8: OOM medido en 4 GiB (Pascal, dev). No hay cifra de float16 (ADR-0002
-        # Sec.4: se estima 5,4-6,1 GiB [E], pendiente de medir en la 3080, V7 abierta)
-        vram_peak_mb={"int8": 3951},
-        speed_ratio={"cpu_int8": 0.2},  # ADR-0002: "~0,15-0,3x [E]", sin medir preciso
-    ),
-}
+# `ModelSpec` y `CATALOG` viven en `catalog.py` desde el lote 8 -- este modulo
+# conserva solo el COMPORTAMIENTO (descargar, borrar, medir en disco), reexportados
+# arriba para no romper la API publica de quien ya hacia `models.ModelSpec` /
+# `models.CATALOG` (ARCHITECTURE.md Sec.3).
 
 
 def _repo_cache_dir(models_dir: Path, repo_id: str) -> Path:

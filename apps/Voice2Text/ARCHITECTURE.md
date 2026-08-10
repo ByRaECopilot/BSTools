@@ -45,14 +45,23 @@ CASCARA        app.py (ventana)          serve.py (--serve)
                        \                  /          <- unica capa que sabe de
                         \                /              ventanas, HTTP y castellano
 ORQUESTACION            jobs.py  (cola FIFO, estado, cancelacion, cerrojo, modelo en RAM)
-                       /    |     \
-MOTOR      transcribe.py  fetch.py  export.py  models.py   (+ errors.py)
-                                                        <- puro: sin estado global,
-                                                           sin config, sin print, sin idioma
+                       /    |     \        \
+MOTOR      transcribe.py  fetch.py  export.py  models.py       <- puro: sin estado global,
+                  \                              /                sin config, sin print,
+                   \____________________________/                 sin idioma
+                                |
+                          catalog.py  +  errors.py     <- HOJAS: datos y codigos.
+                                                          NO IMPORTAN A NADIE
 ```
 
 Ninguna capa importa de una superior. **El motor no importa `webview`, `http.server`, `webbrowser` ni
 `settings`**, no llama a `print()` (usa `logging`) y no llama a `sys.exit()`.
+
+> **Regla de comentarios, a raíz de un docstring caducado encontrado en `jobs.py::_acquire_model`**
+> (decía *"hoy siempre es `cpu` porque `probe_devices()` no activa CUDA hasta el lote 7"*, con el lote 7
+> ya cerrado): **ningún comentario del código cita números de lote ni trabajo futuro.** Un comentario
+> describe **el contrato vigente**; el calendario vive en §13 y en el backlog, que sí se actualizan. Un
+> comentario con fecha de caducidad miente en silencio y nadie lo relee.
 
 ```
 apps/Voice2Text/
@@ -68,11 +77,12 @@ apps/Voice2Text/
 │
 ├── jobs.py                     ORQUESTACION: cola FIFO, estado, cancelacion, cerrojo, modelo en RAM
 │
-├── transcribe.py               MOTOR: faster-whisper + PyAV
-├── models.py                   MOTOR: catalogo, descarga, tamano en disco, borrado
+├── transcribe.py               MOTOR: faster-whisper + PyAV, y la POLITICA de dispositivo/modelo
+├── models.py                   MOTOR: descarga, tamano en disco, borrado (E/S, no datos)
 ├── fetch.py                    MOTOR: yt-dlp, aislado y opcional
 ├── export.py                   MOTOR: .txt y .md
-├── errors.py                   MOTOR: codigos de error + excepcion CoreError
+├── catalog.py                  HOJA: ModelSpec + CATALOG. Datos puros, CERO imports
+├── errors.py                   HOJA: codigos de error + excepcion CoreError
 │
 ├── ui.html                     la interfaz (HTML+CSS+JS, en castellano, autocontenida)
 ├── requirements.txt
@@ -211,9 +221,11 @@ def smoke_test_cuda(model: object) -> tuple[bool, str | None]: ...
     #   "out of memory"                 -> gpu_out_of_memory
     #   resto                           -> gpu_unavailable
 
-def resolve_device(model_id: str, caps: DeviceCapabilities,
+def resolve_device(spec: ModelSpec, caps: DeviceCapabilities,
                    preference: str = "auto",
                    compute_type_override: str | None = None) -> DeviceChoice: ...
+    # Recibe el ModelSpec (de catalog.py), no un model_id: asi no tiene que
+    # buscar en el catalogo y sigue siendo una funcion PURA de sus argumentos.
     # FUNCION PURA: no toca hardware, solo decide a partir de `caps`. Es lo que permite
     # probar la politica de una RTX 3080 desde una GTX 1050 Ti (ver 14).
     # preference: "auto" | "cuda" | "cpu"  <- lo UNICO que puede llegar de la cascara.
@@ -264,6 +276,32 @@ def recommend_profile(caps: DeviceCapabilities,
     # Ya NO recibe model_budget_bytes: el techo murio (ADR-0002 E3).
 ```
 
+> ### Dónde vive esto, y por qué no es donde parecía — decisión del 2026-08-10
+>
+> `recommend_profile()` necesita **dos** cosas: las capacidades del hardware (`transcribe.py`) y el
+> catálogo de modelos (`models.py`). Poner la función en cualquiera de los dos obliga a que un módulo de
+> comportamiento importe al otro, que es el riesgo de ciclo señalado al cerrar el lote 2 — y con razón:
+> `resolve_device()` **ya necesitaba** el catálogo para comprobar la VRAM, así que el acoplamiento existía
+> antes de que apareciera `recommend_profile()`.
+>
+> **La respuesta no es elegir entre los dos módulos: es sacar los datos de en medio.**
+> `ModelSpec` y `CATALOG` **no son comportamiento, son una tabla de hechos** sobre artefactos (repo,
+> bytes, picos de VRAM, orden de calidad). Estaban soldados a `models.py`, que además hace E/S. Se
+> extraen a **`catalog.py`, una hoja que no importa a nadie**. Con eso:
+>
+> - `transcribe.py` importa `catalog.py` — **no importa `models.py`**. No hay inversión ni ciclo posible.
+> - `models.py` importa `catalog.py`. Sigue siendo el único que toca disco y red.
+> - `recommend_profile()` y `ModelRecommendation` **viven en `transcribe.py`, junto a `resolve_device()`**:
+>   son la misma política a dos granularidades (qué modelo / qué dispositivo) y separarlas sería arbitrario.
+>
+> **No hace falta un ADR para esto.** No cambia el número de capas, ni su dirección, ni ninguna invariante
+> de ADR-0001 D11: mueve una tabla de datos a su propia hoja. Es barato de revertir, y registrar decisiones
+> *leaf* en un ADR es un antipatrón declarado.
+>
+> **Si más adelante `transcribe.py` se hace incómodo**, extraer las dos funciones de política a un
+> `profiles.py` queda **pre-aprobado y es mecánico** (son puras, sin estado, sin E/S). No se hace hoy por
+> especulación.
+
 > **Aquí me aparto del encargo, a propósito.** Se pidió que `resolve_device()` resolviera *también el
 > modelo*. **No debe.** Son dos decisiones con ciclos de vida distintos y juntarlas crea un fallo feo:
 >
@@ -288,6 +326,15 @@ def load_model(model_id: str, models_dir: Path, choice: DeviceChoice,
     # quien lo guarda y quien lo suelta es jobs.py (ADR-0001 D22).
     # allow_download=False -> si falta, CoreError(MODEL_MISSING).
 
+@dataclass(frozen=True)
+class MediaProbe:                # del HEADER del contenedor. No decodifica nada
+    duration_seconds: float | None   # PUEDE ser None o mentir (streams, ficheros truncados)
+    has_audio: bool
+    container: str
+
+def probe_media(path: Path) -> MediaProbe: ...
+    # av.open() -> leer cabecera -> cerrar. Milisegundos. NUNCA decodifica.
+
 def transcribe(media_path: Path, model: object, *,
                language: str | None = None,      # None = deteccion automatica
                vad_filter: bool = True,
@@ -301,8 +348,60 @@ def transcribe(media_path: Path, model: object, *,
 - `faster_whisper` devuelve un **generador** de segmentos: el trabajo ocurre al iterarlo. El progreso sale
   de ahí sin instrumentar nada: `progress = segment.end / media_duration_seconds`.
 - La duración del medio y el idioma se conocen **antes** de transcribir: hay barra desde el primer segundo.
-- **Cancelación cooperativa:** se consulta `should_cancel()` en cada vuelta. Latencia = la ventana en curso
-  (hasta ~30 s [E]); la cáscara muestra "Cancelando…" en vez de fingir que ya paró.
+- **Cancelación cooperativa:** se consulta `should_cancel()` en cada vuelta del generador — y ver el
+  recuadro de abajo, porque la causa de la latencia no es la que este documento decía.
+
+> **Corrección medida del 2026-08-10 — mi número era correcto por accidente; la causa, no.** Aquí ponía
+> que la latencia de cancelación era "la ventana en curso del modelo". **Falso.**
+> `model.transcribe()` es **bloqueante hasta el primer segmento**: decodifica el archivo entero, corre el
+> VAD, calcula el espectrograma y detecta el idioma **antes de devolver el generador**. Durante todo ese
+> preámbulo **nadie mira `should_cancel()`**. Medido: **~27 s** en el vídeo largo del dueño [M-dev], y
+> **escala con la duración del archivo** — es el mismo coste que la detección de idioma de §4.3 (~7 s a
+> los 2 min, ~22 s a los 37 min).
+>
+> **La causa importa porque determina qué arreglo funcionaría.** Partir el preámbulo exigiría llamar a las
+> tripas de `faster-whisper` (decodificar, VAD y espectrograma por nuestra cuenta) en vez de a
+> `transcribe()`: acoplarse a los internos de una librería viva para ganar 27 s en una acción poco
+> frecuente. **No se hace.** Se acepta, y se hace visible:
+>
+> 1. `should_cancel()` **se consulta antes de entrar al preámbulo y justo al salir**: cancelar en cola o
+>    recién arrancado sigue siendo instantáneo.
+> 2. Durante el preámbulo la fase es **`detecting_language`** (§4.3): nombre propio y progreso
+>    indeterminado. El usuario ve *qué* pasa, no una ventana quieta.
+> 3. El botón pasa a **"Cancelando…"** y la cáscara **no promete inmediatez**: en archivos largos avisa de
+>    que puede tardar unos segundos.
+>
+> **Cancelar un trabajo EN COLA sigue siendo instantáneo** (§4.1). Lo acotado es solo "cancelar el que ya
+> está corriendo, durante su preámbulo".
+
+> ### `probe_media()` — convertir una espera ciega en una espera con horizonte
+>
+> **Adoptado (propuesta de Pixel al diseñar la interfaz, y es buena).** Hasta ahora
+> `media_duration_seconds` solo se conocía **después** del preámbulo bloqueante — justo la fase que más lo
+> necesita. El contenedor lleva la duración **en la cabecera**: leerla cuesta milisegundos y no decodifica
+> nada.
+>
+> **Cuatro cosas que arregla, por orden de valor:**
+> 1. La fase `detecting_language` deja de ser un cronómetro sin referencia: *"preparando 37 minutos de
+>    audio"*.
+> 2. `estimated_wait_seconds` **se puede calcular desde el primer trabajo** (duración × prior del
+>    catálogo), en vez de ser `null` hasta que uno termine (§4.4).
+> 3. La pantalla puede decir *"esto tardará unos N minutos"* **antes** de empezar, con el fichero concreto
+>    delante.
+> 4. **Adelanta un error de minutos a milisegundos:** si el medio no tiene pista de audio, se emite
+>    `NO_AUDIO_STREAM` **al crear el trabajo**, no tras cargar un modelo de 1,6 GB.
+>
+> **Reglas que no se negocian, porque la cabecera puede mentir:**
+> - `duration_seconds` es `None` cuando falta, y **eso no es un error**: se sigue adelante sin horizonte.
+> - **La duración autoritativa sigue siendo `TranscriptionResult.media_duration_seconds`.** Si discrepan,
+>   manda la autoritativa y la interfaz se corrige sin drama. La de la cabecera **solo** alimenta
+>   estimaciones.
+> - `probe_media()` **no decodifica**. Si algún día alguien mete un decode aquí "para afinar", ha
+>   convertido una operación de milisegundos en una de minutos.
+>
+> **Y un principio que esto deja escrito para todo el contrato: validación barata SÍNCRONA, trabajo
+> ASÍNCRONO.** Encolar puede fallar en el acto (`FILE_NOT_FOUND`, `NO_AUDIO_STREAM`, `UNSUPPORTED_URL`)
+> devolviendo `400` en vez de `202`; lo que tarda minutos es lo único que se encola.
 - `vad_filter=True` por defecto: recorta silencios y **reduce la alucinación de texto repetido**. Las
   marcas de tiempo siguen refiriéndose al medio original.
 - `on_segment` y `should_cancel` son **internos del proceso**: no forman parte del contrato público. Un
@@ -431,7 +530,15 @@ class ModelSpec:
     quality_rank: int                  # 1 = mejor. ORDINAL y [E]: nunca se ha medido
                                        # calidad en espanol. Deuda declarada (ADR-0002 V6)
     vram_peak_mb: dict[str, int]       # por compute_type, MEDIDO: {"int8": 1575, ...}
-    speed_ratio: dict[str, float]      # por (dispositivo, compute_type), MEDIDO donde exista
+    speed_ratio: dict[str, float]      # por (dispositivo, compute_type). VALOR DE ARRANQUE
+                                       # EN FRIO: en cuanto termina el primer trabajo, jobs.py
+                                       # cachea el real por (model_id, device) y este deja de
+                                       # mandar (4.4). Por eso NO lleva dimension de idioma.
+                                       # small/cpu_int8 = 1.534  <- el limpio de habla REAL,
+                                       #   no el 1.725 de TTS (sesgo optimista) ni el 1.15
+                                       #   contaminado, que queda RETIRADO (ADR-0002 seccion 3).
+                                       # medium ~0.40 y turbo ~0.45 son [E] reescalados: se
+                                       #   corrigen con V8. Ninguno cambia una decision.
 
 CATALOG: dict[str, ModelSpec]   # sin `tiny`, sin modelos `.en`, sin variantes distil (solo ingles)
                                 # Repos y cifras medidas: ADR-0002 seccion 3.
@@ -439,11 +546,33 @@ CATALOG: dict[str, ModelSpec]   # sin `tiny`, sin modelos `.en`, sin variantes d
                                 # referencia es mobiuslabsgmbh/faster-whisper-large-v3-turbo,
                                 # tambien fp16 (nunca un pre-cuantizado int8).
 
+# --- catalog.py es una HOJA: ModelSpec y CATALOG viven aqui y NO IMPORTAN NADA. ---
+# models.py conserva solo el comportamiento (descargar, borrar, medir en disco).
+
 def installed(models_dir: Path) -> dict[str, int]: ...      # model_id -> bytes en disco
 def ensure_model(model_id, models_dir, *, on_progress, should_cancel) -> Path: ...
 def delete_model(model_id: str, models_dir: Path) -> int: ...   # bytes liberados
 def total_size(models_dir: Path) -> int: ...
 ```
+
+> ### La descarga es a mano, en trozos, y NO se "simplifica" volviendo a `huggingface_hub`
+>
+> **Decisión con evidencia medida en el lote 2. Alguien intentará deshacerla; que lea esto antes.**
+>
+> `huggingface_hub.snapshot_download()` **se probó y se rechazó**: con el backend Xet, el progreso llega
+> **en un solo salto de 145 MB**, y al cancelar **el archivo sigue bajando ~7 s más** [M-dev]. Para un
+> modelo de 464 MB ya es feo; **para `large-v3` (3,1 GB) es inaceptable** — el usuario vería una barra
+> quieta durante minutos y un botón de cancelar que no cancela.
+>
+> `ensure_model()` descarga **a mano, en trozos de 256 KiB**, con:
+> - **cancelación en milisegundos** (se comprueba `should_cancel()` entre trozos),
+> - **reanudación por cabecera `Range`** desde donde se quedó,
+> - progreso real byte a byte, que es lo que exige la pantalla de primer arranque (§8).
+>
+> **Verificado [M-dev]:** el resultado se carga con `local_files_only=True`, así que el layout en disco es
+> equivalente al de la librería. **La deuda de mantener eso equivalente es el precio consciente** de tener
+> una descarga de 3 GB que se puede cancelar. Si algún día `huggingface_hub` da progreso fino y
+> cancelación inmediata, se revisa **con una medición**, no por elegancia.
 
 `ModelSpec` **no lleva etiquetas** como "recomendado" o "más ligero", ni una bandera `recommended`: **cuál
 es el recomendado depende del hardware** y lo calcula `recommend_profile()`. El adjetivo lo pone
@@ -573,8 +702,14 @@ eta_seconds  = (media_duration_seconds - processed_media_seconds) / speed_ratio
 ```
 
 Hasta entonces `eta_seconds = null` y la cáscara dice "calculando…". **Nunca se enseña una estimación
-inventada.** `estimated_wait_seconds` se calcula igual, sumando lo que va por delante con el `speed_ratio`
-del último trabajo completado; sin ninguno, es `null`.
+inventada.**
+
+`estimated_wait_seconds` suma lo que va por delante, y con `probe_media()` (§3) **ya se puede calcular
+desde el primer trabajo**, con esta jerarquía de fuentes — de más fiable a menos:
+
+1. El `speed_ratio` **real del último trabajo completado** con ese `(model_id, device)`.
+2. Si no hay ninguno, el **prior de `catalog.py`** (`ModelSpec.speed_ratio`), que es para lo que existe.
+3. Si tampoco se conoce la duración (cabecera sin `duration`), entonces sí: **`null` y "calculando…"**.
 
 > **Detalle que hay que respetar desde el lote 2:** el `speed_ratio` de referencia se cachea **por
 > `(model_id, device)`**, no globalmente. Un trabajo que corrió en GPU y otro que va a correr en CPU no
@@ -709,12 +844,13 @@ con la sesión de Windows.** La consola es la que dice que está vivo (sin acent
 **El trato, que va al README con estas palabras:** *el bot de Telegram solo responde mientras el servidor
 esté levantado; si está apagado, el bot no contesta. No es un fallo, es el trato.*
 
-### 6.3 Las nueve operaciones, idénticas en los dos modos
+### 6.3 Las diez operaciones, idénticas en los dos modos
 
 | Operación | Ventana (`window.expose`) | Servidor (`/api/v1`) |
 |---|---|---|
 | contexto inicial | `get_context()` | `GET /health` + `GET /models` |
 | elegir archivo | `pick_file()` | — (el cliente ya tiene la ruta) |
+| **elegir carpeta de destino** | **`pick_folder()`** | — (el cliente pasa `output_dir` en las opciones) |
 | examinar enlace | `probe_url(url)` | `POST /jobs` con `probe_only: true` |
 | encolar | `start_transcription(source, options)` | `POST /jobs` → `202 {job_id, queue_position}` |
 | consultar | `get_job(job_id, since)` | `GET /jobs/{job_id}?since=N` |
@@ -726,6 +862,15 @@ esté levantado; si está apagado, el bot no contesta. No es un fallo, es el tra
 HTTP de los errores: `202` encolado · `400` inválida · `403` token · `404` desconocido · `413` grande ·
 `429` `queue_full` · `507` `disk_full` · `500` interno. **No existe `409`**: con cola FIFO, estar ocupado
 no es un error.
+
+> **`pick_folder()` es la décima, y tapa un hueco que dejé yo.** §11 dice *"la carpeta de destino sí la
+> elige quien llama"*, pero ninguna operación la exponía: la interfaz solo podía enseñarla en solo
+> lectura. Es una línea en la ventana (`create_file_dialog(FOLDER_DIALOG)`) y **no toca el núcleo**:
+> `output_dir` ya viaja en las opciones del trabajo.
+>
+> **Alcance deliberado:** lo elegido vale **para la sesión**, no se persiste. Quien quiera un destino fijo
+> para siempre ya tiene `settings.output_dir` (§9). No se inventa un segundo sitio donde guardar
+> preferencias.
 
 ### 6.4 Exclusividad: nunca dos modelos en RAM
 
@@ -1016,7 +1161,9 @@ todas formas (tope de 100 MB por archivo).
 | **4** | `fetch.py`: enlaces, clasificación de errores, aviso de caducidad, `player_clients` de settings | un muxeado de YouTube **no** produce error · cerrar S7 con un enlace de X | pendiente |
 | **5** | `install.ps1`, `uninstall.ps1`, los dos `.cmd`, `icon.ico`, `README.md` + checklist de cierre | los tres niveles de prueba de la casa | pendiente |
 | **6** | `serve.py`: modo servidor, `/api/v1`, token, exclusividad | `curl` contra los nueve endpoints **y `git diff --stat` sin cambios en el motor** | pendiente |
-| **7** | **GPU (ADR-0002):** `install-gpu.ps1`, `uninstall-gpu.ps1`, `requirements-gpu.txt`, `add_cuda_dlls_to_path()`, imports perezosos, `smoke_test_cuda()`, catálogo con VRAM medida | el instalador **termina ejecutando la prueba de humo y dice el resultado** · desinstalar sin GPU no rompe nada · los tres códigos de fallo dan tres mensajes distintos | pendiente |
+| **7** | **GPU (ADR-0002):** `install-gpu.ps1`, `uninstall-gpu.ps1`, `requirements-gpu.txt`, `add_cuda_dlls_to_path()`, imports perezosos, `smoke_test_cuda()`, catálogo con VRAM medida | el instalador **termina ejecutando la prueba de humo y dice el resultado** · desinstalar sin GPU no rompe nada · los tres códigos de fallo dan tres mensajes distintos | **HECHO** |
+| **8** | `catalog.py` como hoja + `recommend_profile()` en `transcribe.py` | verificado con ejecución real: `large-v3-turbo` en la 1050 Ti, `small` en CPU sola, **sin `--model-id`** · `grep` confirma que `transcribe.py` no importa `models.py` | **HECHO** |
+| **9** | **Enmiendas de contrato del 2026-08-10:** `probe_media()` + validación síncrona al encolar · `pick_folder()` (décima operación) · corregir `small.speed_ratio["cpu_int8"]` a **1.534** y reescalar `medium`/`turbo` · limpiar el docstring caducado de `jobs.py::_acquire_model` | la espera estimada existe **desde el primer trabajo** · un fichero sin audio falla **al encolar**, no tras cargar el modelo · ningún comentario del código cita números de lote | **siguiente** |
 
 **V1 es la verificación que puede cambiar el valor por defecto** (ADR-0001 D5): si 10 minutos de audio en
 español dan menos de 3× tiempo real, `base` pasa a ser el modelo por defecto, sin ADR nuevo.
