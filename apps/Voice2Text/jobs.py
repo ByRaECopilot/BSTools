@@ -259,6 +259,11 @@ class JobManager:
 
         self._loaded_model: Optional[object] = None
         self._loaded_model_key: Optional[tuple[str, str, str]] = None
+        # DeviceChoice REAL con el que quedo cargado `_loaded_model` (lote 7/ADR-0002
+        # E8): tras `load_model()`, no antes -- incluye `fell_back_from`/
+        # `fallback_reason` si la prueba de humo recargo en CPU. `_loaded_model_key`
+        # se deriva de ESTE, nunca del `DeviceChoice` pre-carga (ver `_acquire_model`).
+        self._loaded_model_choice: Optional["transcribe.DeviceChoice"] = None
         self._model_last_used: float = 0.0
 
         self._speed_ratio_cache: dict[tuple[str, str], float] = {}
@@ -291,6 +296,7 @@ class JobManager:
         with self._lock:
             self._loaded_model = None
             self._loaded_model_key = None
+            self._loaded_model_choice = None
         gc.collect()
         self.release_runtime_lock()
 
@@ -723,9 +729,18 @@ class JobManager:
         docstring del modulo). `allow_download=False`: si falta, `MODEL_MISSING`,
         igual que documenta ARCHITECTURE.md Sec.3.
 
-        Cambiar de `model_id` -- o de dispositivo resuelto, que hoy siempre es
-        `cpu` porque `probe_devices()` no activa CUDA hasta el lote 7 -- suelta el
-        modelo anterior antes de cargar el nuevo: nunca dos modelos vivos (D22).
+        Cambiar de `model_id` -- o de dispositivo resuelto -- suelta el modelo
+        anterior antes de cargar el nuevo: nunca dos modelos vivos (D22).
+
+        El `DeviceChoice` que se DEVUELVE (y con el que se indexa la cache) es
+        siempre el REAL: en una carga fresca, el que queda en el modelo tras
+        `load_model()` (que puede haber recargado en CPU por la prueba de humo,
+        lote 7/ADR-0002 E8) -- nunca el `choice` de `resolve_device()`, que solo
+        es la intencion ANTES de cargar. En un acierto de cache, el `choice`
+        recien calculado ya es exacto: solo hay acierto si su `(device,
+        compute_type)` coincide con lo que de verdad quedo cargado, y
+        `fell_back_from` de un `choice` fresco siempre describe la preferencia
+        de ESTE trabajo, no el evento historico de carga.
         """
         caps = transcribe.probe_devices()
         # Lote 8: resolve_device() recibe el ModelSpec del catalogo, no el model_id
@@ -745,18 +760,28 @@ class JobManager:
             stale = self._loaded_model
             self._loaded_model = None
             self._loaded_model_key = None
+            self._loaded_model_choice = None
 
         if stale is not None:
             del stale
             gc.collect()  # S13: confirma que se libera la memoria nativa, no solo la referencia Python
 
         model = transcribe.load_model(model_id, self._models_dir, choice, allow_download=False)
+        # `load_model()` guarda el DeviceChoice REAL en el propio manejador
+        # (`transcribe._ATTR_DEVICE_CHOICE`) porque pudo recargar en CPU tras la
+        # prueba de humo DENTRO de esta llamada. Leerlo de vuelta aqui es lo que
+        # antes faltaba: sin esto, `job.device_used` y `loaded_model()` (health,
+        # lote 6) seguian mostrando la intencion pre-carga, mudos ante la caida
+        # que ADR-0002 exige anunciar siempre.
+        final_choice = getattr(model, transcribe._ATTR_DEVICE_CHOICE, choice)
+        key = (model_id, final_choice.device, final_choice.compute_type)
 
         with self._lock:
             self._loaded_model = model
             self._loaded_model_key = key
+            self._loaded_model_choice = final_choice
             self._model_last_used = time.monotonic()
-        return choice, model
+        return final_choice, model
 
     def _idle_loop(self) -> None:
         # D22: se suelta el modelo tras `model_idle_timeout_seconds` sin trabajos
@@ -775,6 +800,7 @@ class JobManager:
                         should_unload = True
                         self._loaded_model = None
                         self._loaded_model_key = None
+                        self._loaded_model_choice = None
             if should_unload:
                 gc.collect()
                 logger.info("modelo liberado tras %.0fs de inactividad", self._model_idle_timeout_seconds)
