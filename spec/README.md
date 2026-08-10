@@ -28,17 +28,27 @@ aparece aquí: es estado vivo, no un documento con vigencia — léelo directo o
 
 | Carpeta | Qué contiene | Audiencia | Docs | Vigentes | Derogados / históricos | Índice |
 |---|---|---|---:|---:|---:|---|
-| `spec/constitution/` | Misión, principios, roadmap y stack — síntesis derivada de los ADRs | Mesa del dueño | 4 | 0 | 0 | — |
-| `spec/guides/` | Manuales de uso, guías funcionales y legal (D2.5, re-domicilia lo que era `docs/`) | Zona de consulta (agentes) | 1 | 0 | 0 | — |
-| `spec/operations/` | Runbooks: deploy, rollback, entornos, incidentes, inventario de secretos (D2.5) | Zona de consulta (agentes) | 1 | 0 | 0 | — |
+| `spec/constitution/` | Misión, principios, roadmap y stack — síntesis derivada de los ADRs | Mesa del dueño | 4 | 0 | 0 | [índice](constitution/README.md) |
+| `spec/decisions/` | Un archivo por decisión (`ADR-NNNN-<slug>.md`) | Zona de consulta (agentes) | 3 | 1 | 1 | [índice](decisions/README.md) |
+| `spec/guides/` | Manuales de uso, guías funcionales y legal (D2.5, re-domicilia lo que era `docs/`) | Zona de consulta (agentes) | 1 | 0 | 0 | [índice](guides/README.md) |
+| `spec/operations/` | Runbooks: deploy, rollback, entornos, incidentes, inventario de secretos (D2.5) | Zona de consulta (agentes) | 1 | 0 | 0 | [índice](operations/README.md) |
+| `spec/sessions/` | El handoff VIVO — rotación de uno, `session-close` mueve el anterior a `_archive/` (D6) | Mesa del dueño | 1 | 1 | 0 | — |
 
-**Total: 6 documentos** (excluido `spec/backlog/backlog.md`, estado vivo). ⚠️ **6 sin `status`** — se consideran no vigentes:
+**Total: 10 documentos** (excluido `spec/backlog/backlog.md`, estado vivo). ⚠️ **6 sin `status`** — se consideran no vigentes:
 - `spec/constitution/mission.md`
 - `spec/constitution/principles.md`
 - `spec/constitution/roadmap.md`
 - `spec/constitution/tech-stack.md`
 - `spec/guides/guia-nueva-herramienta.md`
 - `spec/operations/entorno-local.md`
+
+## ⚠️ Documentos derogados o parcialmente derogados
+
+**No los uses como contrato sin leer primero su `superseded_by`.**
+
+| | Documento | Título | Reemplazado por |
+|---|---|---|---|
+| 🟠 | [`ADR-0001-voice2text-stack.md`](decisions/ADR-0001-voice2text-stack.md) | ADR-0001 — Voice2Text: núcleo de transcripción local reutilizable, con faster-whisper y sin ffmpeg del sistema | ADR-0002-voice2text-modelo-y-gpu.md — supersede D5, D20 y la regla de peso de §7 |
 
 ## Todos los documentos
 
@@ -51,6 +61,14 @@ aparece aquí: es estado vivo, no un documento con vigencia — léelo directo o
 | ❓ | [`roadmap.md`](constitution/roadmap.md) | Roadmap — BSTools | 2 |
 | ❓ | [`tech-stack.md`](constitution/tech-stack.md) | Tech Stack — BSTools | 7 |
 
+### `spec/decisions/` — Zona de consulta (agentes)
+
+| | Documento | Título | KB |
+|---|---|---|---:|
+| 🟣 | [`ADR-0002-voice2text-modelo-y-gpu.md`](decisions/ADR-0002-voice2text-modelo-y-gpu.md) | ADR-0002 — Voice2Text: catálogo de modelos por perfil de hardware y GPU como complemento opcional | 37 |
+| ⚪ | [`ADR-0003-voice2text-cookies-del-navegador.md`](decisions/ADR-0003-voice2text-cookies-del-navegador.md) | ADR-0003 — Voice2Text: cookies del navegador del usuario, desactivadas por defecto | 13 |
+| 🟠 | [`ADR-0001-voice2text-stack.md`](decisions/ADR-0001-voice2text-stack.md) | ADR-0001 — Voice2Text: núcleo de transcripción local reutilizable, con faster-whisper y sin ffmpeg del sistema | 71 |
+
 ### `spec/guides/` — Zona de consulta (agentes)
 
 | | Documento | Título | KB |
@@ -62,3 +80,9 @@ aparece aquí: es estado vivo, no un documento con vigencia — léelo directo o
 | | Documento | Título | KB |
 |---|---|---|---:|
 | ❓ | [`entorno-local.md`](operations/entorno-local.md) | Entorno de la máquina principal | 1 |
+
+### `spec/sessions/` — Mesa del dueño
+
+| | Documento | Título | KB |
+|---|---|---|---:|
+| 🟢 | [`2026-08-09-01-handoff.md`](sessions/2026-08-09-01-handoff.md) | MDViewer 1.1.0 entregado y canon actualizado | 3 |
