@@ -1,0 +1,28 @@
+# Modelos descargados (464 MB el small). Se bajan al primer uso; borrables cuando quieras.
+models/
+
+# Material de prueba local del dueno (videos/audios reales). No se versiona: es suyo,
+# pesa, y la entrada de prueba de este repo debe ser sintetica o quedarse fuera de git.
+test/
+
+# Perfil propio de WebView2 (ver ARCHITECTURE.md 6.1). Se regenera solo.
+webview/
+
+# Descargas y temporales de cada trabajo
+work/
+
+# Salida por defecto de las transcripciones desde enlace
+salida/
+
+# Ajustes locales de esta maquina (los valores por defecto estan en settings.py)
+settings.json
+
+# Estado de ejecucion y secreto del modo servidor
+runtime.lock
+runtime.json
+serve-token.txt
+
+# Accesos directos generados por install.ps1 (rutas absolutas de cada maquina)
+*.lnk
+
+__pycache__/

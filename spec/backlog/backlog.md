@@ -21,3 +21,6 @@
 - Mermaid: cargar el `.mmd` del menú contextual directamente en el editor (hoy hay que pegar el
   contenido).
 - Mermaid: autoruteo ortogonal de las flechas.
+- Voice2Text: herramienta nueva para transcribir un audio/vídeo local o un enlace público a `.txt` y `.md`
+  (diseño aceptado en `spec/decisions/ADR-0001-voice2text-stack.md`, spike del lote 0 hecho; pendiente de
+  construir los lotes 1-6).

@@ -1,0 +1,11 @@
+# Voice2Text - dependencias del motor (lote 1, ADR-0001)
+#
+# faster-whisper arrastra ctranslate2, av (PyAV), onnxruntime, huggingface_hub y
+# tokenizers como dependencias transitivas: no hace falta listarlas aparte.
+# Sin tope de version: no hay ningun requisito de compatibilidad conocido todavia.
+faster-whisper
+
+# Se anaden en lotes posteriores, cuando el codigo que los usa exista:
+#   yt-dlp     (lote 4, fetch.py)  -- SIN techo de version (ADR-0001 D del stack:
+#                                      persigue cambios de plataforma continuos)
+#   pywebview  (lote 3, app.py)
