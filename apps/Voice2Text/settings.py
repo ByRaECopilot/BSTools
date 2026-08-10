@@ -46,6 +46,15 @@ DEFAULTS: dict[str, Any] = {
     "work_retention_hours": 24,
     "ytdlp_stale_days": 60,
     "youtube_player_clients": ["android", "ios", "tv", "web"],
+    # Encargo del 2026-08-10 (ADR-0003 C2): `None` = desactivado, el comportamiento
+    # de siempre -- mismo idioma que ya usan `default_model_id`/`compute_type_override`/
+    # `language`/`output_dir` aqui arriba, nunca un sentinela de texto aparte.
+    # "chrome"/"edge"/"firefox" activan `--cookies-from-browser` de yt-dlp para ESE
+    # navegador. Nunca un valor fijo por defecto: las cookies son credenciales de
+    # sesion de quien instala la herramienta, se activan a mano (`fetch.py` nunca lee
+    # esta clave -- la cascara la normaliza con `fetch.normalize_cookies_from_browser()`
+    # y se la pasa por argumento, mismo patron D26 que `youtube_player_clients`).
+    "youtube_cookies_from_browser": None,
     "serve_port": 8317,
     "max_queued_jobs": 8,
     "model_idle_timeout_seconds": 300,

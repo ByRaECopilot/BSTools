@@ -182,6 +182,13 @@ def _normalize_options(raw: dict[str, Any]) -> dict[str, Any]:
         # pero se normalizan siempre para que `Job.options` tenga una forma unica.
         "player_clients": list(raw.get("player_clients") or []),
         "max_input_bytes": raw.get("max_input_bytes") or _DEFAULT_MAX_INPUT_BYTES,
+        # Cookies del navegador (encargo del 2026-08-10), OPCIONAL: a diferencia de
+        # `player_clients`, su ausencia es un estado valido (desactivado), no un
+        # `ValueError` -- ver `submit_transcription`. `normalize_cookies_from_browser`
+        # es la MISMA funcion pura que usan las tres cascaras: un "none"/vacio que se
+        # cuele hasta aqui (p.ej. desde `serve.py`, que copia `settings.json` tal
+        # cual) se normaliza igual, nunca dos criterios distintos para "desactivado".
+        "cookies_from_browser": fetch.normalize_cookies_from_browser(raw.get("cookies_from_browser")),
     }
 
 
@@ -711,6 +718,7 @@ class JobManager:
             max_bytes=job.options["max_input_bytes"],
             on_progress=on_progress,
             should_cancel=should_cancel,
+            cookies_from_browser=job.options.get("cookies_from_browser"),
         )
 
         with self._lock:

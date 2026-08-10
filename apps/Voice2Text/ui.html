@@ -539,6 +539,16 @@ details.technical pre { white-space: pre-wrap; word-break: break-word; font-size
     <span>Recorte de silencios (VAD)</span>
   </label>
   <p class="small muted">Recorta silencios largos; ayuda a evitar texto repetido.</p>
+  <label class="stack">
+    <span class="muted small">Cookies del navegador (para enlaces que exigen inicio de sesión)</span>
+    <select id="g-cookies-browser">
+      <option value="">Desactivado</option>
+      <option value="chrome">Chrome</option>
+      <option value="edge">Edge</option>
+      <option value="firefox">Firefox</option>
+    </select>
+  </label>
+  <p class="small muted">Desactivado es lo recomendado. Actívalo solo si un enlace lo pide: se leen del navegador para esa descarga y nunca se guardan ni se registran en ningún sitio.</p>
   <div class="row" style="justify-content:flex-end;">
     <button id="g-save" class="primary" type="button">Guardar</button>
   </div>
@@ -1039,14 +1049,18 @@ el('c-transcribe').addEventListener('click', async () => {
     });
   } else {
     // Origen de enlace: jobs.py descarga en su fase `fetching` antes de
-    // transcribir (ARCHITECTURE.md Sec.3/4.3). `player_clients` y
-    // `max_input_bytes` vienen de `App.ctx.settings` (settings.py, ADR-0001
-    // D26) -- esta cascara nunca los inventa, solo los traslada.
+    // transcribir (ARCHITECTURE.md Sec.3/4.3). `player_clients`,
+    // `max_input_bytes` y `cookies_from_browser` vienen de `App.ctx.settings`
+    // (settings.py, ADR-0001 D26/ADR-0003) -- esta cascara nunca los inventa,
+    // solo los traslada. `youtube_cookies_from_browser` es `null` cuando esta
+    // desactivado (por defecto, ADR-0003 C2): `jobs._normalize_options` lo
+    // normaliza igual con la misma funcion pura que usan las otras cascaras.
     source = { kind: 'url', url: App.urlSource.url };
     options = Object.assign({}, baseOptions, {
       output_dir: App.outputDirOverride || null,
       player_clients: App.ctx.settings.youtube_player_clients || [],
       max_input_bytes: App.ctx.settings.max_input_bytes,
+      cookies_from_browser: App.ctx.settings.youtube_cookies_from_browser || null,
     });
   }
   await beginTranscription(source, options);
@@ -1456,6 +1470,10 @@ async function runErrorAction(action) {
     openPanel('f');
     return;
   }
+  if (action === 'go_to_settings') {
+    openPanel('g');
+    return;
+  }
   if (action === 'open_source_url') {
     const url = (App.lastErrorContext && App.lastErrorContext.source && App.lastErrorContext.source.url) || (App.urlSource && App.urlSource.url);
     if (url) api('open_external', url);
@@ -1608,6 +1626,7 @@ function renderPanelG() {
   el('g-output-dir').title = s.output_dir || '';
   el('g-device-preference').value = s.device_preference || 'auto';
   el('g-vad-filter').checked = s.vad_filter !== false;
+  el('g-cookies-browser').value = s.youtube_cookies_from_browser || '';
 }
 el('g-output-dir-pick').addEventListener('click', async () => {
   const folder = await api('pick_folder');
@@ -1624,6 +1643,7 @@ el('g-save').addEventListener('click', async () => {
     output_dir: el('g-output-dir').dataset.picked || App.ctx.settings.output_dir || null,
     device_preference: el('g-device-preference').value,
     vad_filter: el('g-vad-filter').checked,
+    youtube_cookies_from_browser: el('g-cookies-browser').value || null,
   };
   try {
     App.ctx.settings = await api('save_settings', overrides);

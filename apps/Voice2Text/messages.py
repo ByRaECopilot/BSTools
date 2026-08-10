@@ -267,6 +267,22 @@ def _fmt_details_bytes(details: dict[str, Any], key: str) -> str:
     return format_bytes(details.get(key))
 
 
+# Cookies del navegador (encargo del 2026-08-10): nombre tecnico -> nombre que ve el
+# usuario. `details["cookies_from_browser"]` (fetch.py, `_raise_for_download_error`)
+# solo lleva el NOMBRE del navegador -- nunca una cookie -- por eso es seguro
+# formatearlo directo en pantalla.
+_BROWSER_DISPLAY_NAMES: dict[str, str] = {
+    "chrome": "Chrome",
+    "edge": "Edge",
+    "firefox": "Firefox",
+}
+
+
+def _browser_display_name(details: dict[str, Any]) -> str:
+    code = details.get("cookies_from_browser")
+    return _BROWSER_DISPLAY_NAMES.get(code or "", "el navegador")
+
+
 _ERROR_TEMPLATES: dict[str, dict[str, Any]] = {
     "unsupported_url": {
         "title": "No sé descargar de ese sitio.",
@@ -276,9 +292,30 @@ _ERROR_TEMPLATES: dict[str, dict[str, Any]] = {
         "surface": "card",
     },
     "login_required": {
-        "title": "Ese contenido exige iniciar sesión, y Voice2Text nunca inicia sesión.",
-        "hint": "Descárgalo tú y arrástralo aquí.",
-        "primary": ("Descargar el archivo yo mismo", "open_source_url"),
+        "title": "Ese contenido exige iniciar sesión.",
+        "hint": "Descárgalo tú y arrástralo aquí, o activa tus cookies del navegador en Ajustes avanzados: solo se usan para esta descarga, nunca se guardan.",
+        "primary": ("Activar cookies del navegador", "go_to_settings"),
+        "secondary": ("Descargar el archivo yo mismo", "open_source_url"),
+        "surface": "card",
+    },
+    "cookies_browser_not_found": {
+        "title": "No encuentro las cookies de {browser} en este equipo.",
+        "hint": "Revisa que {browser} esté instalado y que hayas iniciado sesión en YouTube con él, o elige otro navegador en Ajustes avanzados.",
+        "primary": ("Ir a Ajustes avanzados", "go_to_settings"),
+        "secondary": ("Reintentar", "retry"),
+        "surface": "card",
+    },
+    "cookies_browser_locked": {
+        "title": "{browser} está abierto y bloquea el acceso a sus cookies.",
+        "hint": "Cierra {browser} por completo (revisa que no quede en segundo plano) y vuelve a intentarlo.",
+        "primary": ("Reintentar", "retry"),
+        "secondary": None,
+        "surface": "card",
+    },
+    "cookies_expired": {
+        "title": "Tus cookies de {browser} ya no bastan para iniciar sesión (puede que hayan caducado).",
+        "hint": "Vuelve a iniciar sesión en YouTube desde {browser} y reintenta.",
+        "primary": ("Reintentar", "retry"),
         "secondary": ("Elegir otro origen", "restart"),
         "surface": "card",
     },
@@ -430,6 +467,10 @@ def error_message(code: str, details: Optional[dict[str, Any]] = None) -> dict[s
         title = title.format(downloaded=_fmt_details_bytes(details, "downloaded_bytes"))
     elif code == "disk_full":
         hint = hint.format(required=_fmt_details_bytes(details, "required_bytes"), path=details.get("path", ""))
+    elif code in ("cookies_browser_not_found", "cookies_browser_locked", "cookies_expired"):
+        browser = _browser_display_name(details)
+        title = title.format(browser=browser)
+        hint = hint.format(browser=browser)
 
     return {
         "code": code,

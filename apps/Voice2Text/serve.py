@@ -99,6 +99,9 @@ _ERROR_HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.GPU_LIBRARIES_MISSING: 400,
     ErrorCode.GPU_OUT_OF_MEMORY: 400,
     ErrorCode.GPU_UNAVAILABLE: 400,
+    ErrorCode.COOKIES_BROWSER_NOT_FOUND: 400,
+    ErrorCode.COOKIES_BROWSER_LOCKED: 400,
+    ErrorCode.COOKIES_EXPIRED: 400,
 }
 
 _MAX_BODY_BYTES = 1 * 1024 * 1024  # 1 MiB: solo JSON de metadatos, nunca el medio
@@ -393,12 +396,15 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if source.get("kind") == "url":
-            # D26: player_clients SIEMPRE sale de settings.json, nunca lo escribe
-            # quien llama -- un bot no tiene por que conocer este detalle de
-            # yt-dlp. Si el cliente ya lo trae explicito en `options`, se respeta.
+            # D26: player_clients (y, desde el encargo del 2026-08-10,
+            # cookies_from_browser) SIEMPRE salen de settings.json, nunca los
+            # escribe quien llama -- un bot no tiene por que conocer este detalle
+            # de yt-dlp. Si el cliente ya los trae explicitos en `options`, se
+            # respetan.
             options = dict(options)
             options.setdefault("player_clients", self._settings.get("youtube_player_clients"))
             options.setdefault("max_input_bytes", self._settings.get("max_input_bytes"))
+            options.setdefault("cookies_from_browser", self._settings.get("youtube_cookies_from_browser"))
 
         try:
             job_id, position = self._job_manager.submit_transcription(source, options)

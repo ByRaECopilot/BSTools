@@ -19,6 +19,16 @@ un DATO para que la cascara lo comente, no una senal de fallo:
   - `NO_AUDIO_STREAM` se reserva a que PyAV, sobre el archivo YA DESCARGADO, confirme que
     de verdad no hay ninguna pista de audio -- nunca se infiere del contenedor o del
     `player_client` usado.
+
+Cookies del navegador (encargo del 2026-08-10), OPCIONAL y desactivada por defecto,
+mismo patron D26 que `player_clients`: `cookies_from_browser` llega SIEMPRE por
+argumento -- este archivo NUNCA lee `settings.json`, ni sabe que existe. Contrato de
+privacidad, innegociable: las cookies son credenciales de sesion de quien las presta.
+Este archivo NUNCA fija `cookiefile` (no se escribe un cookiejar propio a disco), NUNCA
+registra ni un byte de su contenido (ni en `technical`, ni en `details` de `CoreError`:
+solo viaja el NOMBRE del navegador, nunca el valor de una cookie), y le entrega el
+nombre del navegador a `cookiesfrombrowser` de yt-dlp tal cual -- es yt-dlp quien lee el
+perfil del navegador y lo descarta despues de cada llamada, no una copia nuestra.
 """
 from __future__ import annotations
 
@@ -137,12 +147,36 @@ def validate_url(url: str) -> None:
         )
 
 
-def _base_ydl_opts(player_clients: list[str]) -> dict:
+def normalize_cookies_from_browser(value: Optional[str]) -> Optional[str]:
+    """`None` (el valor por defecto de `settings.py`, ADR-0003 C2) o cadena vacia se
+    normalizan a `None` -- "desactivado". El sentinela de texto `"none"` tambien se
+    acepta por si acaso (p.ej. `cli.py`, donde un flag de linea de comandos no puede
+    llevar `null` de verdad). Cualquier otro valor se devuelve tal cual, en
+    minusculas: esta funcion NO decide la lista de navegadores soportados (eso vive
+    en settings.py/ui.html/cli.py, capa de cascara); un nombre que yt-dlp no
+    reconozca termina en `CoreError(COOKIES_BROWSER_NOT_FOUND)` al primer intento de
+    descarga, no aqui. Pura y sin estado, para que las tres cascaras (mas `jobs.py`)
+    no dupliquen el mismo chequeo cada una a su manera.
+    """
+    if not value:
+        return None
+    value = value.strip().lower()
+    return value if value and value != "none" else None
+
+
+def _base_ydl_opts(player_clients: list[str], cookies_from_browser: Optional[str] = None) -> dict:
     opts = dict(_YDL_BASE_OPTS)
     # `player_clients` llega SIEMPRE por argumento (D26): este archivo no lo lee de
     # `settings.json`. Es el parametro que mas rapido caduca [O] -- se arregla editando
     # un dato, sin tocar esta linea.
     opts["extractor_args"] = {"youtube": {"player_client": list(player_clients)}}
+    if cookies_from_browser:
+        # Tupla que exige la API de yt-dlp: (browser_name, profile, keyring, container).
+        # Solo el navegador nos hace falta hoy -- el resto se deja en su default
+        # (perfil mas reciente, sin contenedor). NUNCA se fija `cookiefile`: las
+        # cookies se leen del navegador y se le pasan a yt-dlp en memoria, jamas se
+        # escribe un cookiejar propio (contrato de privacidad de este modulo).
+        opts["cookiesfrombrowser"] = (cookies_from_browser,)
     return opts
 
 
@@ -174,9 +208,35 @@ _DOWNLOAD_FAILED_MARKERS = (
     "http error 5", "urlopen error", "temporary failure",
 )
 
+# Cookies del navegador (encargo del 2026-08-10): tres subcadenas de yt-dlp/cookies.py,
+# medidas en vivo (ver INFORME de la tarea) contra Chrome y Edge reales en Windows.
+# Gateadas por `cookies_active` -- SOLO se consultan cuando la llamada de verdad pidio
+# cookies, para no reclasificar por accidente un error de red que comparta alguna
+# palabra suelta con estos mensajes.
+_COOKIES_NOT_FOUND_MARKERS = (
+    "could not find", "could not read local state", "unsupported browser",
+)
+_COOKIES_LOCKED_MARKERS = (
+    "could not copy", "permission denied", "database is locked",
+)
+# Mensaje literal de yt-dlp cuando el propio antibot de YouTube sigue rechazando la
+# sesion PESE a haber cookies activas -- es yt-dlp quien recomienda cookies con este
+# texto exacto ("Sign in to confirm..."), asi que si ya las dimos y sigue apareciendo,
+# la lectura mas honesta es que esa sesion ya no sirve (caducada), no que falte iniciar
+# sesion. Con `cookies_active=False` este mismo texto cae en el cubo LOGIN_REQUIRED de
+# siempre, sin cambios.
+_COOKIES_STILL_BLOCKED_MARKERS = ("sign in to confirm",)
 
-def _classify_download_error(message: str) -> ErrorCode:
+
+def _classify_download_error(message: str, cookies_active: bool = False) -> ErrorCode:
     low = message.lower()
+    if cookies_active:
+        if any(marker in low for marker in _COOKIES_STILL_BLOCKED_MARKERS):
+            return ErrorCode.COOKIES_EXPIRED
+        if any(marker in low for marker in _COOKIES_LOCKED_MARKERS):
+            return ErrorCode.COOKIES_BROWSER_LOCKED
+        if any(marker in low for marker in _COOKIES_NOT_FOUND_MARKERS):
+            return ErrorCode.COOKIES_BROWSER_NOT_FOUND
     if "unsupported url" in low or "no extractor" in low:
         return ErrorCode.UNSUPPORTED_URL
     if any(marker in low for marker in _LOGIN_REQUIRED_MARKERS):
@@ -192,10 +252,15 @@ def _classify_download_error(message: str) -> ErrorCode:
     return ErrorCode.EXTRACTOR_OUTDATED
 
 
-def _raise_for_download_error(exc: Exception, url: str) -> NoReturn:
+def _raise_for_download_error(exc: Exception, url: str, cookies_from_browser: Optional[str] = None) -> NoReturn:
     message = one_line(str(exc))
-    code = _classify_download_error(message)
+    code = _classify_download_error(message, cookies_active=bool(cookies_from_browser))
     details: dict = {"url": url}
+    if cookies_from_browser:
+        # Solo el NOMBRE del navegador (p.ej. "chrome") -- nunca una cookie, nunca una
+        # ruta con contenido de sesion: es el mismo dato que ya circula como argumento
+        # de esta llamada, no algo nuevo que este archivo empiece a exponer.
+        details["cookies_from_browser"] = cookies_from_browser
     if code == ErrorCode.EXTRACTOR_OUTDATED:
         version, age_days = ytdlp_version()
         details["ytdlp_version"] = version
@@ -225,12 +290,17 @@ def _resolve_single_entry(info: Optional[dict]) -> dict:
     return info
 
 
-def probe(url: str, player_clients: list[str]) -> MediaInfo:
-    """Titulo/duracion/extractor SIN descargar (fase `probing`, ARCHITECTURE.md Sec.4.3)."""
+def probe(url: str, player_clients: list[str], *, cookies_from_browser: Optional[str] = None) -> MediaInfo:
+    """Titulo/duracion/extractor SIN descargar (fase `probing`, ARCHITECTURE.md Sec.4.3).
+
+    `cookies_from_browser` (D26, mismo patron que `player_clients`): `None` =
+    desactivado, igual que hoy. La cascara ya lo normaliza con
+    `normalize_cookies_from_browser()` antes de llamar aqui.
+    """
     validate_url(url)
     yt_dlp = _import_yt_dlp()
 
-    opts = _base_ydl_opts(player_clients)
+    opts = _base_ydl_opts(player_clients, cookies_from_browser)
     opts["format"] = _FORMAT_SELECTOR
     opts["postprocessors"] = []
 
@@ -238,7 +308,7 @@ def probe(url: str, player_clients: list[str]) -> MediaInfo:
         with yt_dlp.YoutubeDL(opts) as ydl:
             raw_info = ydl.extract_info(url, download=False)
     except yt_dlp.utils.DownloadError as exc:
-        _raise_for_download_error(exc, url)
+        _raise_for_download_error(exc, url, cookies_from_browser)
     except Exception as exc:  # yt-dlp no garantiza una jerarquia propia para todo
         raise CoreError(
             ErrorCode.INTERNAL, details={"url": url}, technical=one_line(str(exc))
@@ -269,9 +339,13 @@ def fetch_audio(
     max_bytes: int,
     on_progress: Callable[[int, Optional[int]], None],   # (bytes hechos, total o None)
     should_cancel: Callable[[], bool],
+    cookies_from_browser: Optional[str] = None,   # inyectado por la cascara, igual que player_clients
 ) -> FetchedMedia:
     """Descarga (fase `fetching`). Nunca exige ni invoca postprocesadores (D2/D3): jamas
     fusiona streams, jamas requiere el binario `ffmpeg`.
+
+    `cookies_from_browser`: `None` = desactivado (comportamiento identico al de antes
+    de este encargo). La cascara ya lo normaliza con `normalize_cookies_from_browser()`.
     """
     validate_url(url)
     yt_dlp = _import_yt_dlp()
@@ -299,7 +373,7 @@ def fetch_audio(
             done = status.get("downloaded_bytes") or status.get("total_bytes") or 0
             on_progress(done, status.get("total_bytes") or done)
 
-    opts = _base_ydl_opts(player_clients)
+    opts = _base_ydl_opts(player_clients, cookies_from_browser)
     opts["format"] = _FORMAT_SELECTOR
     opts["postprocessors"] = []              # PROHIBIDO (D2/D3): exigiria ffmpeg
     opts["outtmpl"] = outtmpl
@@ -314,7 +388,7 @@ def fetch_audio(
             ErrorCode.CANCELLED, details={"url": url}, technical=one_line(str(exc))
         ) from exc
     except DownloadError as exc:
-        _raise_for_download_error(exc, url)
+        _raise_for_download_error(exc, url, cookies_from_browser)
     except Exception as exc:
         raise CoreError(
             ErrorCode.INTERNAL, details={"url": url}, technical=one_line(str(exc))

@@ -118,12 +118,22 @@ estrictamente necesario) y lo transcribe igual que un archivo local.
 
 Lo que hay que saber de esta vía, sin adornarlo:
 
-- **Solo contenido público.** Voice2Text nunca inicia sesión ni usa tus cookies del
-  navegador: si el contenido exige iniciar sesión, es privado o tiene restricción de
-  edad, la descarga falla — es la plataforma pidiendo una credencial que esta
-  herramienta, a propósito, nunca ofrece.
+- **Por defecto, solo contenido público.** Voice2Text no inicia sesión ni usa tus
+  cookies del navegador salvo que tú lo actives: si el contenido exige iniciar
+  sesión, es privado o tiene restricción de edad, la descarga falla — es la
+  plataforma pidiendo una credencial que esta herramienta, por defecto, no ofrece.
 - **X (Twitter) y Facebook exigen sesión a menudo**, así que fallarán con
   frecuencia. De nuevo: no es un fallo de Voice2Text, es la plataforma.
+- **Cookies del navegador, opcional y desactivado por defecto.** En **Ajustes
+  avanzados** puedes activar "Cookies del navegador" (Chrome, Edge o Firefox) para
+  que los enlaces que exigen sesión funcionen con la tuya. Se leen del navegador
+  para esa descarga y **nunca se guardan ni se registran en ningún sitio** — ni en
+  disco propio, ni en los archivos de texto/consola de la herramienta. Si el
+  navegador está abierto puede bloquear el acceso a sus cookies (ciérralo e
+  inténtalo de nuevo); si el enlace sigue fallando tras activarlas, puede que la
+  sesión haya caducado — vuelve a iniciar sesión en el navegador. En modo servidor
+  y en `cli.py` es el mismo interruptor: `settings.json` (`youtube_cookies_from_browser`)
+  o `--cookies-from-browser` en `cli.py`.
 - **`yt-dlp` es una dependencia viva**: las plataformas cambian sus mecanismos de
   descarga cada pocas semanas y `yt-dlp` se actualiza para seguirles el ritmo. Si un
   enlace que antes funcionaba deja de hacerlo, actualízalo:
@@ -207,9 +217,10 @@ los recomendados, y ese es precisamente el trueque frente a los modelos mayores
 - **No transcribe en la nube.** Todo ocurre en tu equipo; nada del audio ni del
   texto sale de tu máquina (salvo, claro, la propia descarga si transcribes desde
   un enlace).
-- **No inicia sesión en ninguna plataforma**, nunca usa tus cookies del navegador:
-  por diseño, no por que falte terminarlo. Es la razón por la que algunos enlaces
-  (contenido privado, X, Facebook) fallan.
+- **No inicia sesión en ninguna plataforma por defecto**, ni usa tus cookies del
+  navegador salvo que actives esa opción en Ajustes avanzados (ver "Enlaces"
+  arriba). Con las cookies desactivadas — el estado de fábrica — algunos enlaces
+  (contenido privado, X, Facebook) fallan; es la razón de siempre.
 - **No purga tus modelos solo.** `models/` puede crecer si descargas varios; bórralos
   desde la pantalla de gestión de modelos, o borra la carpeta entera a mano —
   se vuelve a descargar si hace falta.

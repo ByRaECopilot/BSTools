@@ -21,10 +21,11 @@ Unica capa que sabe de `webview`, de Windows y de castellano (junto con
 `start_transcription()` acepta un origen `file` o `url` por igual: `jobs.py` es
 quien encola y orquesta la descarga (fase `fetching`) antes de transcribir, esta
 cascara no reimplementa nada de eso. `ui.html` es quien compone `options` para
-un origen de enlace -- incluidos `player_clients` y `max_input_bytes`, leidos de
-`App.ctx.settings` (que ya trae TODAS las claves de `settings.py`, ADR-0001
-D26) -- exactamente igual que ya hace hoy con `device_preference`/`vad_filter`
-para un archivo local: esta cascara Python no necesita inyectar nada aparte.
+un origen de enlace -- incluidos `player_clients`, `max_input_bytes` y (desde el
+encargo del 2026-08-10) `cookies_from_browser`, leidos de `App.ctx.settings`
+(que ya trae TODAS las claves de `settings.py`, ADR-0001 D26) -- exactamente
+igual que ya hace hoy con `device_preference`/`vad_filter` para un archivo
+local: esta cascara Python no necesita inyectar nada aparte.
 """
 from __future__ import annotations
 
@@ -302,7 +303,13 @@ class Api:
         usa para `/health` (Sec.2: orquestar es lo unico exclusivo de `jobs.py`;
         una consulta sincrona no orquesta nada).
         """
-        info = fetch.probe(url, list(self._settings.get("youtube_player_clients") or []))
+        info = fetch.probe(
+            url,
+            list(self._settings.get("youtube_player_clients") or []),
+            cookies_from_browser=fetch.normalize_cookies_from_browser(
+                self._settings.get("youtube_cookies_from_browser")
+            ),
+        )
         return {
             "title": info.title,
             "duration_seconds": info.duration_seconds,
@@ -399,6 +406,7 @@ class Api:
     # no de uso diario, y no tiene control en esta pantalla.
     _SETTINGS_SCREEN_KEYS = frozenset({
         "language", "output_formats", "output_dir", "device_preference", "vad_filter",
+        "youtube_cookies_from_browser",
     })
 
     @_safe

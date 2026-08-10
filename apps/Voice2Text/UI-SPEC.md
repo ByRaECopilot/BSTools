@@ -560,8 +560,11 @@ contrario en la columna "Superficie".
 | Código | Superficie | Botón principal | Botón secundario |
 |---|---|---|---|
 | `unsupported_url` | validación en línea si es el esquema (§7.2); tarjeta completa si lo rechaza yt-dlp | "Elegir un archivo en su lugar" | — |
-| `login_required` | tarjeta completa | "Descargar el archivo yo mismo" (abre el enlace en el navegador) | "Elegir otro origen" |
+| `login_required` | tarjeta completa | "Activar cookies del navegador" (→ Ajustes avanzados) si las cookies están desactivadas (encargo del 2026-08-10) | "Descargar el archivo yo mismo" (abre el enlace en el navegador) |
 | `geo_blocked` | tarjeta completa | "Elegir otro origen" | — |
+| `cookies_browser_not_found` (encargo del 2026-08-10) | tarjeta completa | "Ir a Ajustes avanzados" | "Reintentar" |
+| `cookies_browser_locked` (encargo del 2026-08-10) | tarjeta completa | **"Reintentar"** (tras cerrar el navegador) | — |
+| `cookies_expired` (encargo del 2026-08-10) | tarjeta completa | **"Reintentar"** (tras volver a iniciar sesión en el navegador) | "Elegir otro origen" |
 | `media_unavailable` | tarjeta completa | "Comprobar el enlace en el navegador" (lo abre) | "Elegir otro origen" |
 | `download_failed` | tarjeta completa | **"Reintentar"** | "Elegir otro origen" |
 | `extractor_outdated` | tarjeta completa | **"Copiar el comando"** (`py -3 -m pip install --upgrade yt-dlp`, a portapapeles con confirmación) | "Reintentar de todos modos" |

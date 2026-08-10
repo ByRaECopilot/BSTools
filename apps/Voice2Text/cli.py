@@ -18,9 +18,12 @@ Uso:
 
 Un argumento posicional que empiece por `http://` o `https://` se trata como
 enlace: se descarga con `fetch.py` (MOTOR, ARCHITECTURE.md Sec.3) a `work/`
-antes de transcribir, con el mismo `player_clients`/tope de tamano que
+antes de transcribir, con el mismo `player_clients`/tope de tamano/cookies que
 resolveria `settings.py` en las otras dos cascaras -- aqui se pasan por flag
-(`--player-clients`, `--max-bytes`) porque este arnes no lee `settings.json`.
+(`--player-clients`, `--max-bytes`, `--cookies-from-browser`) porque este
+arnes no lee `settings.json`. `--cookies-from-browser` es OPCIONAL y
+"none" (desactivado) por defecto, igual que `settings.py` (encargo del
+2026-08-10): las cookies del navegador solo se activan a mano.
 
 `--self-check` no transcribe nada del usuario: imprime las `DeviceCapabilities`
 reales, la `DeviceChoice` que resuelve `resolve_device()` y ejecuta la prueba de
@@ -98,6 +101,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--max-bytes", type=int, default=2147483648,
         help="tope de descarga para un origen de enlace, en bytes (2 GiB por defecto, igual que settings.py)",
+    )
+    parser.add_argument(
+        "--cookies-from-browser", choices=["none", "chrome", "edge", "firefox"], default="none",
+        help="OPCIONAL, desactivado por defecto (encargo del 2026-08-10): lee las cookies de "
+             "sesion de ese navegador para enlaces que exigen inicio de sesion. Se leen del "
+             "navegador y se le pasan a yt-dlp; esta herramienta nunca las guarda ni las imprime.",
     )
     return parser.parse_args(argv)
 
@@ -268,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
                     max_bytes=args.max_bytes,
                     on_progress=on_fetch_progress,
                     should_cancel=lambda: False,  # este arnes no tiene otro hilo que pueda cancelar
+                    cookies_from_browser=fetch.normalize_cookies_from_browser(args.cookies_from_browser),
                 )
             except CoreError as err:
                 _print_error(err)
