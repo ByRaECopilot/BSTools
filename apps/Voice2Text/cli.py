@@ -83,6 +83,51 @@ def _print_error(err: CoreError) -> None:
     _print(f"ERROR [{err.code.value}] detalles={err.details} tecnico={err.technical}")
 
 
+# Motivo estable (transcribe.DeviceCapabilities.unavailable_reason /
+# smoke_test_cuda) -> accion sugerida en una linea (mismo vocabulario que
+# install-gpu.ps1 imprime al terminar la instalacion, ver su bloque final).
+_FALLBACK_REASON_ACTIONS = {
+    "no_nvidia_gpu": "no se detecta ninguna GPU NVIDIA visible para CUDA.",
+    "cuda_libs_missing": "el complemento de GPU no esta instalado. Corre install-gpu.ps1.",
+    "cuda_libs_not_on_path": "la instalacion del complemento de GPU quedo a medias. Vuelve a correr install-gpu.ps1.",
+    "cuda_libs_mismatch": "las librerias CUDA no cargan (version incompatible). Revisa requirements-gpu.txt y reinstala.",
+    "compute_capability_too_low": "esta GPU no soporta ningun compute_type utilizable.",
+    "insufficient_vram": "no queda VRAM suficiente para este modelo con la holgura exigida. Prueba un modelo mas chico.",
+    "gpu_libraries_missing": "falta una DLL o la instalacion quedo a medias. Vuelve a correr install-gpu.ps1.",
+    "gpu_out_of_memory": "no hay VRAM suficiente para este modelo en esta GPU. Prueba un modelo mas chico.",
+    "gpu_unavailable": "la GPU no paso la prueba de humo real. Revisa que el driver NVIDIA este instalado y actualizado.",
+}
+
+
+def _report_device_fallback(preference: str, choice: "transcribe.DeviceChoice") -> None:
+    """Avisa de una caida de GPU a CPU -- NUNCA muda (ADR-0002, regla dura).
+
+    `preference == "cuda"` es un pedido EXPLICITO del usuario: se avisa en un
+    bloque prominente con el motivo y la accion sugerida, porque instalar ~2 GB
+    de CUDA y terminar en CPU sin enterarse es exactamente lo que ADR-0002
+    prohibe. `preference == "auto"` no pidio nada en concreto: basta una linea.
+    """
+    if not choice.fell_back_from:
+        return
+
+    action = _FALLBACK_REASON_ACTIONS.get(choice.fallback_reason, "revisa el motivo de arriba.")
+
+    if preference == "cuda":
+        _print("")
+        _print("=" * 70)
+        _print("AVISO: se pidio GPU (--device-preference cuda) y NO se esta usando.")
+        _print(f"  Motivo: {choice.fallback_reason}")
+        _print(f"  {action}")
+        _print(f"  Se transcribe en {choice.device} (compute_type={choice.compute_type}).")
+        _print("=" * 70)
+        _print("")
+    else:
+        _print(
+            f"Aviso: se prefiere '{choice.fell_back_from}' pero no esta disponible "
+            f"({choice.fallback_reason}); se usa {choice.device}."
+        )
+
+
 def _self_check(args: argparse.Namespace) -> int:
     """Prueba de humo de GPU, sin transcribir nada del usuario (ADR-0002 Sec.6/14).
 
@@ -181,11 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cpu_threads is not None:
         device_choice = dataclasses.replace(device_choice, cpu_threads=args.cpu_threads)
 
-    if device_choice.fell_back_from:
-        _print(
-            f"Aviso: se prefiere '{device_choice.fell_back_from}' pero no esta disponible "
-            f"({device_choice.fallback_reason}); se usa {device_choice.device}."
-        )
+    _report_device_fallback(args.device_preference, device_choice)
 
     _print(f"Cargando modelo '{args.model_id}' en {device_choice.device} (compute_type={device_choice.compute_type})...")
     load_start = time.monotonic()
@@ -227,6 +268,15 @@ def main(argv: list[str] | None = None) -> int:
     except CoreError as err:
         _print_error(err)
         return 1
+
+    # Segundo punto donde puede aparecer un fallback (ADR-0002 E8): si
+    # `device_choice.device == "cuda"` no hubo aviso previo (se creia disponible),
+    # pero `load_model()` pudo haber recaido en CPU tras la prueba de humo real
+    # DENTRO de `transcribe.load_model()`. `result.device_used` es la verdad final;
+    # `device_choice` (arriba) es solo la intencion antes de cargar. Sin este
+    # chequeo, esa caida queda muda -- exactamente el sintoma que ADR-0002 prohibe.
+    if device_choice.device == "cuda":
+        _report_device_fallback(args.device_preference, result.device_used)
 
     _print(
         "Terminado: idioma=%s (%.0f%%) duracion=%.1fs elapsed=%.1fs speed_ratio=%.2fx "

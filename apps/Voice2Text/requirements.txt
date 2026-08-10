@@ -11,5 +11,6 @@ faster-whisper
 #   py -3 -m pip install --upgrade yt-dlp
 yt-dlp
 
-# Se anade en un lote posterior, cuando el codigo que lo usa exista:
-#   pywebview  (lote 3, app.py)
+# app.py (lote 3): ventana de escritorio. Usa el backend EdgeChromium (WebView2)
+# en Windows, ya presente en el sistema desde Windows 10 2004+ / Windows 11.
+pywebview

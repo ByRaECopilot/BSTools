@@ -81,3 +81,33 @@ def load(path: Path = SETTINGS_PATH) -> dict[str, Any]:
             logger.warning("settings.json: clave desconocida ignorada: %s", key)
 
     return resolved
+
+
+def save(overrides: dict[str, Any], path: Path = SETTINGS_PATH) -> dict[str, Any]:
+    """Funde `overrides` (SOLO claves conocidas de `DEFAULTS`) dentro de lo que
+    ya hubiera en `settings.json` y lo reescribe entero (lote 3, Pantalla G de
+    Ajustes avanzados: `app.py.Api.save_settings`).
+
+    Lee lo existente antes de sobreescribir para no perder ajustes que la
+    pantalla de Ajustes no expone (Sec.9: no todas las claves tienen control
+    ahi -- `serve_port`, `max_queued_jobs`... son de operacion). Un JSON
+    invalido o illegible se trata como "no habia nada": se sobreescribe con
+    limpio, nunca revienta el guardado.
+    """
+    current: dict[str, Any] = {}
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                current = raw
+        except (OSError, ValueError):
+            current = {}
+
+    for key, value in overrides.items():
+        if key in DEFAULTS:
+            current[key] = value
+        else:
+            logger.warning("save(): clave desconocida ignorada: %s", key)
+
+    path.write_text(json.dumps(current, ensure_ascii=True, indent=2), encoding="utf-8")
+    return load(path)

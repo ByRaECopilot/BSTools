@@ -1,0 +1,1617 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Voice2Text</title>
+<style>
+/* ============================================================ tokens (UI-SPEC.md Sec.3) */
+:root {
+  --bg:        #0e1016;
+  --panel:     #161923;
+  --panel-2:   #1d212e;
+  --line:      #2a2f3d;
+  --line-2:    #363c4d;
+  --text:      #e8eaf0;
+  --muted:     #98a0b3;
+  --accent:    #7c8cff;
+  --accent-soft: #7c8cff22;
+  --ok:        #47d18a;
+  --warn:      #f5a623;
+  --danger:    #ff6b6b;
+  --shadow:    0 10px 30px rgba(0,0,0,.35);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #eef1f6; --panel: #ffffff; --panel-2: #f4f6fa;
+    --line: #e1e5ec; --line-2: #d3d9e3;
+    --text: #1a1f2b; --muted: #667085;
+    --accent: #5b6cf0; --accent-soft: #5b6cf01a;
+    --ok: #16a34a; --warn: #b45309; --danger: #e5484d;
+    --shadow: 0 10px 30px rgba(20,30,60,.12);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+}
+code, .mono { font-family: "Cascadia Code", Consolas, ui-monospace, monospace; }
+
+button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .5; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) { outline: none; }
+
+h1, h2, h3, p { margin: 0; }
+
+.hidden { display: none !important; }
+
+/* ------------------------------------------------------------ cabecera */
+#header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  gap: 12px;
+}
+#header .title { font-size: 16px; font-weight: 600; }
+#header .actions { display: flex; align-items: center; gap: 8px; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 12px; background: var(--panel-2); border: 1px solid var(--line);
+  color: var(--muted);
+}
+.chip.ok { color: var(--ok); border-color: var(--ok); }
+.chip.warn { color: var(--warn); border-color: var(--warn); }
+.chip svg { width: 14px; height: 14px; }
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 8px;
+  background: transparent; border: 1px solid transparent; color: var(--muted);
+}
+.icon-btn:hover { background: var(--panel-2); border-color: var(--line); color: var(--text); }
+.icon-btn svg { width: 18px; height: 18px; }
+
+/* ------------------------------------------------------------ contenido */
+#main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.screen {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  gap: 16px;
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+}
+.screen h2 { font-size: 20px; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+button.primary {
+  background: var(--accent); color: #fff; border: none;
+  border-radius: 8px; padding: 9px 16px; font-weight: 600;
+}
+button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+
+button.secondary {
+  background: transparent; color: var(--text);
+  border: 1px solid var(--line-2); border-radius: 8px; padding: 9px 16px;
+}
+button.secondary:hover:not(:disabled) { background: var(--panel-2); }
+
+button.link {
+  background: none; border: none; color: var(--accent); padding: 2px 0;
+  text-decoration: underline;
+}
+
+input[type=text], input[type=url], select {
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 8px; padding: 8px 10px; width: 100%;
+}
+input[type=checkbox], input[type=radio] { accent-color: var(--accent); width: 16px; height: 16px; }
+
+.row { display: flex; align-items: center; gap: 8px; }
+.row.between { justify-content: space-between; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+
+/* ------------------------------------------------------------ pantalla C: origen */
+#dropzone {
+  border: 2px dashed var(--line-2);
+  border-radius: 12px;
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--muted);
+  transition: border-color .15s, background .15s;
+}
+#dropzone.dragover { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+#dropzone svg { width: 32px; height: 32px; margin-bottom: 8px; }
+
+.origin-preview {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px;
+}
+.origin-preview .name {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.divider-text {
+  display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px;
+}
+.divider-text::before, .divider-text::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+#options-panel { display: none; flex-direction: column; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+#options-panel.open { display: flex; }
+
+.formats { display: flex; gap: 16px; }
+.formats label { display: flex; align-items: center; gap: 6px; }
+
+/* ------------------------------------------------------------ progreso */
+.bar-track {
+  height: 8px; border-radius: 999px; background: var(--panel-2);
+  border: 1px solid var(--line); overflow: hidden;
+}
+.bar-fill {
+  height: 100%; background: var(--accent); border-radius: 999px;
+  transition: width .3s ease;
+}
+.bar-fill.indeterminate {
+  width: 40% !important;
+  background: linear-gradient(90deg, var(--accent-soft), var(--accent), var(--accent-soft));
+  animation: bar-slide 1.3s linear infinite;
+}
+@keyframes bar-slide {
+  0% { margin-left: -40%; }
+  100% { margin-left: 100%; }
+}
+.bar-caption { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; }
+.timer { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 20px; }
+
+.phase-trail { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); }
+.phase-trail .step { padding: 3px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); }
+.phase-trail .step.active { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+.phase-trail .step.done { color: var(--ok); border-color: var(--ok); }
+
+/* ------------------------------------------------------------ transcripcion en vivo */
+#transcript-panel {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2);
+  padding: 10px; max-height: 260px; overflow-y: auto; position: relative;
+  flex: 1 1 auto; min-height: 120px;
+}
+#transcript-panel .empty { color: var(--muted); text-align: center; padding: 20px 8px; }
+.segment-line { display: flex; gap: 8px; padding: 3px 0; align-items: baseline; }
+.segment-line .ts { color: var(--muted); font-size: 12px; flex: none; }
+#transcript-jump {
+  position: sticky; bottom: 6px; margin-left: auto; width: fit-content;
+  background: var(--accent); color: #fff; border: none; border-radius: 999px;
+  padding: 6px 12px; font-size: 12px; display: none;
+}
+#transcript-jump.show { display: block; }
+
+/* ------------------------------------------------------------ banners (Sec.4.2) */
+.banner {
+  display: flex; gap: 10px; border-left: 3px solid var(--warn);
+  background: var(--panel-2); border-radius: 8px; padding: 10px 12px;
+  align-items: flex-start;
+}
+.banner.danger { border-left-color: var(--danger); }
+.banner svg { width: 18px; height: 18px; flex: none; color: var(--warn); margin-top: 1px; }
+.banner.danger svg { color: var(--danger); }
+.banner .body { flex: 1 1 auto; }
+.banner .close { background: none; border: none; color: var(--muted); flex: none; }
+
+/* ------------------------------------------------------------ tarjeta de error a pantalla completa */
+#screen-error .card { border-color: var(--danger); }
+#screen-error .icon-wrap { width: 40px; height: 40px; border-radius: 999px; background: #ff6b6b22; display: flex; align-items: center; justify-content: center; color: var(--danger); flex: none; }
+#screen-error .icon-wrap svg { width: 22px; height: 22px; }
+details.technical { margin-top: 8px; }
+details.technical summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+details.technical pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--bg); padding: 8px; border-radius: 6px; margin-top: 6px; }
+
+/* ------------------------------------------------------------ tarjeta de modelo */
+.model-card {
+  display: flex; gap: 10px; align-items: flex-start;
+  border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+  background: var(--panel-2); cursor: pointer;
+}
+.model-card.selected { border-color: var(--accent); background: var(--accent-soft); }
+.model-card.not-viable { opacity: .55; }
+.model-card input { margin-top: 2px; }
+.model-card .head { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.model-card .badge { font-size: 11px; font-weight: 700; color: var(--accent); }
+.model-card .meta { color: var(--muted); font-size: 12px; }
+.model-card .row-btn { margin-top: 6px; }
+
+/* ------------------------------------------------------------ paneles superpuestos F/G */
+#overlay-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; z-index: 50;
+}
+#overlay-backdrop.show { display: block; }
+.overlay-panel {
+  position: fixed; top: 0; right: 0; height: 100%; width: min(420px, 92vw);
+  background: var(--panel); border-left: 1px solid var(--line); box-shadow: var(--shadow);
+  z-index: 51; display: none; flex-direction: column; padding: 18px; gap: 14px;
+  overflow-y: auto;
+}
+.overlay-panel.show { display: flex; }
+.overlay-panel .head { display: flex; justify-content: space-between; align-items: center; }
+
+/* ------------------------------------------------------------ toasts */
+#toasts { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 60; }
+.toast {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 14px; box-shadow: var(--shadow); font-size: 13px;
+}
+
+/* ------------------------------------------------------------ responsive (Sec.16) */
+@media (max-width: 840px) {
+  #working-grid { flex-direction: column !important; }
+  #transcript-panel { max-height: 180px; }
+}
+
+#loading-screen { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div class="title">Voice2Text</div>
+  <div class="actions">
+    <span id="device-chip" class="chip"></span>
+    <button id="btn-open-models" class="icon-btn" title="Modelos instalados" aria-label="Modelos instalados"></button>
+    <button id="btn-open-settings" class="icon-btn" title="Ajustes avanzados" aria-label="Ajustes avanzados"></button>
+  </div>
+</div>
+
+<div id="main">
+
+  <div id="loading-screen"><p>Cargando…</p></div>
+
+  <!-- ======================= Pantalla B: primer arranque ======================= -->
+  <section id="screen-b" class="screen hidden">
+    <h2>Falta el modelo de reconocimiento de voz</h2>
+    <p class="muted">Se descarga una sola vez y se queda en tu equipo. Puedes borrarlo cuando quieras.</p>
+    <div id="b-initial-source" class="banner hidden"></div>
+    <div id="b-model-list" class="stack"></div>
+    <button id="b-toggle-more" class="link" type="button">Ver más modelos ▾</button>
+    <div id="b-model-list-more" class="stack hidden"></div>
+    <div class="card stack">
+      <div class="row between"><span class="muted">Se guardará en</span><span id="b-models-dir" class="mono small"></span></div>
+      <div class="row between"><span class="muted">Espacio libre en ese disco</span><span id="b-disk-free" class="small"></span></div>
+      <div class="row between"><span class="muted">Aceleración GPU</span><span id="b-device-chip" class="chip"></span></div>
+    </div>
+    <div id="b-error" class="banner danger hidden"></div>
+    <div class="row" style="justify-content:flex-end;">
+      <button id="b-download-btn" class="primary" type="button">Descargar</button>
+    </div>
+    <div id="b-progress" class="card stack hidden">
+      <p>Descargando el modelo de reconocimiento…</p>
+      <div class="bar-track"><div id="b-progress-fill" class="bar-fill" style="width:0%"></div></div>
+      <p class="bar-caption"><span id="b-progress-text"></span><span></span></p>
+      <p class="small muted">Puedes cerrar esta ventana y volver más tarde: se retoma donde se quedó.</p>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="b-cancel-download" class="secondary" type="button">Cancelar descarga</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= Pantalla C: principal ======================= -->
+  <section id="screen-c" class="screen hidden">
+    <div id="c-ytdlp-warning" class="banner hidden"></div>
+
+    <div id="dropzone" tabindex="0" role="button" aria-label="Arrastra un vídeo o audio, o elige un archivo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>
+      <div>Arrastra un vídeo o audio aquí</div>
+      <div class="small">o</div>
+      <button id="c-pick-file" class="secondary" type="button" style="margin-top:8px;">Elegir archivo…</button>
+    </div>
+
+    <div id="c-origin-preview" class="origin-preview hidden">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M6 2h9l5 5v15H6z"/></svg>
+      <span id="c-origin-name" class="name"></span>
+      <button id="c-origin-clear" class="icon-btn" type="button" aria-label="Quitar origen"></button>
+    </div>
+
+    <div class="divider-text">o pega un enlace</div>
+    <div class="row">
+      <input id="c-url-input" type="url" placeholder="https://…" aria-label="Enlace" />
+      <button id="c-url-examine" class="secondary" type="button">Examinar</button>
+    </div>
+    <div id="c-url-inline-error" class="small" style="color:var(--danger);"></div>
+    <div id="c-url-preview" class="origin-preview hidden"></div>
+    <div id="c-url-unavailable" class="banner hidden"></div>
+
+    <div id="c-destination" class="row between hidden">
+      <span class="muted small">Se guardará en: <span id="c-destination-path" class="mono"></span></span>
+      <button id="c-destination-change" class="link" type="button">Cambiar</button>
+    </div>
+
+    <button id="c-options-toggle" class="link" type="button">Opciones ▾</button>
+    <div id="options-panel">
+      <label class="stack">
+        <span class="muted small">Modelo</span>
+        <select id="c-model-select"></select>
+      </label>
+      <label class="stack">
+        <span class="muted small">Idioma</span>
+        <select id="c-language-select">
+          <option value="">Automático</option>
+          <option value="es">Español</option>
+          <option value="en">Inglés</option>
+        </select>
+      </label>
+      <div class="stack">
+        <span class="muted small">Salida</span>
+        <div class="formats">
+          <label><input type="checkbox" id="c-format-txt" checked> .txt</label>
+          <label><input type="checkbox" id="c-format-md" checked> .md</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="justify-content:flex-end;">
+      <button id="c-transcribe" class="primary" type="button" disabled>Transcribir</button>
+    </div>
+  </section>
+
+  <!-- ======================= Pantalla D: trabajando ======================= -->
+  <section id="screen-d" class="screen hidden">
+    <div class="row between">
+      <div>
+        <h2 id="d-title"></h2>
+        <p id="d-origin-name" class="muted small mono"></p>
+      </div>
+      <span id="d-device-chip" class="chip"></span>
+    </div>
+
+    <div id="d-phase-trail" class="phase-trail"></div>
+
+    <div id="d-queued-info" class="card hidden"></div>
+
+    <div id="d-progress-block" class="stack hidden">
+      <div id="d-timer" class="timer hidden">00:00</div>
+      <div class="bar-track"><div id="d-bar-fill" class="bar-fill" style="width:0%"></div></div>
+      <p class="bar-caption"><span id="d-bar-caption-left"></span><span id="d-bar-caption-right"></span></p>
+      <p id="d-phase-hint" class="small muted"></p>
+    </div>
+
+    <div id="working-grid" style="display:flex; gap:16px; flex:1 1 auto; min-height:0;">
+      <div id="transcript-panel" class="hidden">
+        <div id="transcript-content">
+          <div class="empty">El texto aparecerá aquí en cuanto empiece la transcripción.</div>
+        </div>
+        <button id="transcript-jump" type="button">↓ nuevo texto</button>
+      </div>
+    </div>
+
+    <div id="d-writing-warning" class="banner danger hidden">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+      <div class="body" id="d-writing-warning-text"></div>
+    </div>
+
+    <div class="row" style="justify-content:flex-end; gap:8px;">
+      <p id="d-cancel-note" class="small muted"></p>
+      <button id="d-cancel" class="secondary" type="button">Cancelar</button>
+    </div>
+  </section>
+
+  <!-- ======================= Pantalla E: resultado ======================= -->
+  <section id="screen-e" class="screen hidden">
+    <div class="row" style="gap:10px;">
+      <span class="chip ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M20 6L9 17l-5-5"/></svg>Listo</span>
+    </div>
+    <p id="e-summary" class="muted"></p>
+
+    <div id="e-fallback-warning" class="banner hidden"></div>
+    <div id="e-confidence-warning" class="banner hidden"></div>
+
+    <div id="e-outputs" class="stack"></div>
+
+    <p id="e-process-time" class="small muted"></p>
+
+    <div id="transcript-panel-result" class="stack" style="flex:1 1 auto; min-height:0;"></div>
+
+    <div class="row" style="justify-content:flex-end;">
+      <button id="e-transcribe-another" class="primary" type="button">Transcribir otro</button>
+    </div>
+  </section>
+
+  <!-- ======================= Tarjeta de error a pantalla completa ======================= -->
+  <section id="screen-error" class="screen hidden">
+    <div class="card stack">
+      <div class="row" style="align-items:flex-start;">
+        <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg></div>
+        <div class="stack" style="flex:1;">
+          <h2 id="err-title"></h2>
+          <p id="err-hint" class="muted"></p>
+        </div>
+      </div>
+      <details id="err-technical-wrap" class="technical hidden">
+        <summary>Detalle técnico ▾</summary>
+        <pre id="err-technical" class="mono"></pre>
+      </details>
+      <div class="row" style="justify-content:flex-end; gap:8px;">
+        <button id="err-secondary" class="secondary hidden" type="button"></button>
+        <button id="err-primary" class="primary hidden" type="button"></button>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div id="overlay-backdrop"></div>
+
+<!-- ======================= Panel F: gestión de modelos ======================= -->
+<aside id="panel-f" class="overlay-panel" role="dialog" aria-label="Modelos instalados">
+  <div class="head">
+    <h2>Modelos instalados</h2>
+    <button class="icon-btn panel-close" data-panel="f" aria-label="Cerrar"></button>
+  </div>
+  <p id="f-total" class="muted small"></p>
+  <div id="f-installed-list" class="stack"></div>
+  <button id="f-toggle-add" class="link" type="button">+ Añadir otro modelo ▾</button>
+  <div id="f-add-list" class="stack hidden"></div>
+  <p class="small muted">Los modelos no se borran solos. Puedes borrar la carpeta "models" entera cuando quieras: se volverá a descargar si hace falta.</p>
+  <div id="f-progress" class="card stack hidden">
+    <p id="f-progress-title"></p>
+    <div class="bar-track"><div id="f-progress-fill" class="bar-fill" style="width:0%"></div></div>
+    <p class="bar-caption"><span id="f-progress-text"></span><span></span></p>
+    <div class="row" style="justify-content:flex-end;">
+      <button id="f-cancel-download" class="secondary" type="button">Cancelar descarga</button>
+    </div>
+  </div>
+</aside>
+
+<!-- ======================= Panel G: ajustes avanzados ======================= -->
+<aside id="panel-g" class="overlay-panel" role="dialog" aria-label="Ajustes avanzados">
+  <div class="head">
+    <h2>Ajustes avanzados</h2>
+    <button class="icon-btn panel-close" data-panel="g" aria-label="Cerrar"></button>
+  </div>
+  <label class="stack">
+    <span class="muted small">Idioma</span>
+    <select id="g-language">
+      <option value="">Automático</option>
+      <option value="es">Español</option>
+      <option value="en">Inglés</option>
+    </select>
+  </label>
+  <div class="stack">
+    <span class="muted small">Formatos de salida</span>
+    <div class="formats">
+      <label><input type="checkbox" id="g-format-txt"> .txt</label>
+      <label><input type="checkbox" id="g-format-md"> .md</label>
+    </div>
+  </div>
+  <div class="stack">
+    <span class="muted small">Carpeta de destino</span>
+    <div class="row between">
+      <span id="g-output-dir" class="mono small" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">junto al origen</span>
+      <button id="g-output-dir-pick" class="link" type="button">Elegir…</button>
+    </div>
+  </div>
+  <label class="stack">
+    <span class="muted small">Preferencia de GPU</span>
+    <select id="g-device-preference">
+      <option value="auto">Automático</option>
+      <option value="cpu">Forzar CPU</option>
+      <option value="cuda">Forzar GPU</option>
+    </select>
+  </label>
+  <p class="small muted">Automático es lo recomendado: la herramienta ya decide lo mejor para tu hardware.</p>
+  <label class="row">
+    <input type="checkbox" id="g-vad-filter">
+    <span>Recorte de silencios (VAD)</span>
+  </label>
+  <p class="small muted">Recorta silencios largos; ayuda a evitar texto repetido.</p>
+  <div class="row" style="justify-content:flex-end;">
+    <button id="g-save" class="primary" type="button">Guardar</button>
+  </div>
+</aside>
+
+<div id="toasts"></div>
+
+<script>
+'use strict';
+
+/* ============================================================ iconos SVG en linea */
+const ICONS = {
+  check: '<path d="M20 6L9 17l-5-5"/>',
+  'alert-triangle': '<path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/>',
+  download: '<path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/>',
+  trash: '<path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6"/>',
+  folder: '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>',
+  cpu: '<rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3"/>',
+  zap: '<path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/>',
+  link: '<path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/>',
+  file: '<path d="M6 2h9l5 5v15H6z"/>',
+  x: '<path d="M18 6L6 18M6 6l12 12"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>',
+  'chevron-down': '<path d="M6 9l6 6 6-6"/>',
+  cog: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09A1.65 1.65 0 0015 4.6a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>',
+  grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
+};
+function iconSvg(name, cls) {
+  const body = ICONS[name] || ICONS.info;
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ${cls ? `class="${cls}"` : ''}>${body}</svg>`;
+}
+
+/* ============================================================ puente con Python */
+function apiReady() {
+  return new Promise((resolve) => {
+    if (window.pywebview && window.pywebview.api) { resolve(); return; }
+    window.addEventListener('pywebviewready', () => resolve());
+  });
+}
+async function api(method, ...args) {
+  const fn = window.pywebview.api[method];
+  if (!fn) throw new Error('operacion desconocida: ' + method);
+  const res = await fn(...args);
+  if (res && typeof res === 'object' && 'error' in res) {
+    const err = new Error(res.error.technical || res.error.code || 'error');
+    err.apiError = res.error;
+    throw err;
+  }
+  return res && typeof res === 'object' && 'data' in res ? res.data : res;
+}
+
+/* ============================================================ estado */
+const App = {
+  ctx: null,
+  screen: 'loading',
+  fileSource: null,   // {path, display_name, size_bytes, duration_seconds}
+  urlSource: null,    // {url, title, duration_seconds, extractor}
+  outputDirOverride: null,
+  currentJobId: null,  // Pantalla B (descarga) o Pantalla D (transcripcion) -- excluyentes
+  panelJobId: null,    // descarga de modelo lanzada desde el Panel F, independiente de currentJobId
+  jobKind: null,       // 'transcription' | 'model_download' (para el panel B/F)
+  pollHandle: null,
+  phaseStartedAt: null,
+  lastPhase: null,
+  cancelling: false,
+  transcriptSince: 0,
+  transcriptSegments: [],
+  transcriptUserScrolledUp: false,
+  lastErrorContext: null,  // {source, options} para "Reintentar"
+  moreModelsOpenB: false,
+  moreModelsOpenF: false,
+};
+
+function el(id) { return document.getElementById(id); }
+function showScreen(name) {
+  ['screen-b', 'screen-c', 'screen-d', 'screen-e', 'screen-error'].forEach((id) => el(id).classList.add('hidden'));
+  el('loading-screen').classList.add('hidden');
+  App.screen = name;
+  el('screen-' + name).classList.remove('hidden');
+}
+function toast(text, ms) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = text;
+  el('toasts').appendChild(t);
+  setTimeout(() => t.remove(), ms || 3000);
+}
+
+/* ============================================================ formato (siempre via Python: messages.py) */
+async function fmtBytes(n) { return api('format_bytes', n); }
+async function fmtMinutesPer10(sr) { return api('format_minutes_per_10', sr); }
+async function fmtMmss(seconds) { return api('format_mmss', seconds); }
+async function fmtPercent(fraction) { return api('format_percent', fraction); }
+
+/* ============================================================ arranque */
+function initStaticIcons() {
+  el('c-origin-clear').innerHTML = iconSvg('x');
+  document.querySelectorAll('.panel-close').forEach((b) => { b.innerHTML = iconSvg('x'); });
+}
+
+async function boot() {
+  initStaticIcons();
+  await apiReady();
+  bindDropHooks();
+  bindGlobalKeys();
+  try {
+    App.ctx = await api('get_context');
+  } catch (exc) {
+    el('loading-screen').innerHTML = '<p>No se pudo iniciar Voice2Text.<br>' + escapeHtml(exc.message || '') + '</p>';
+    return;
+  }
+  renderHeader();
+  applyStaticCopy();
+  const hasModels = Object.keys(App.ctx.models_installed || {}).length > 0;
+  if (!hasModels) {
+    renderScreenB();
+    showScreen('b');
+  } else {
+    await renderScreenC();
+    showScreen('c');
+    if (App.ctx.initial_source_path) {
+      await adoptFile(App.ctx.initial_source_path);
+    }
+  }
+}
+
+function applyStaticCopy() {
+  // Textos que dependen de `App.ctx.copy` (messages.py, via get_context) pero no
+  // de ningun trabajo en curso: se fijan una sola vez, al arrancar.
+  el('d-writing-warning-text').textContent = App.ctx.copy.writing_cancel_warning;
+}
+
+function renderHeader() {
+  const chip = App.ctx.device_chip;
+  el('device-chip').innerHTML = `${iconSvg(chip.icon)}<span>${escapeHtml(chip.label)}</span>`;
+  el('device-chip').className = 'chip ' + (chip.severity === 'ok' ? 'ok' : chip.severity === 'warn' ? 'warn' : '');
+  el('btn-open-models').innerHTML = iconSvg('grid');
+  el('btn-open-settings').innerHTML = iconSvg('cog');
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ============================================================ Pantalla B: primer arranque */
+function pickDefaultModelsForB() {
+  const cards = App.ctx.catalog;
+  const recommended = cards.find((c) => c.model_id === App.ctx.recommended_model_id) || cards[0];
+  const light = cards
+    .filter((c) => c.model_id !== recommended.model_id && c.viable)
+    .sort((a, b) => a.expected_bytes - b.expected_bytes)[0];
+  const shown = [recommended, light].filter(Boolean);
+  const rest = cards.filter((c) => !shown.includes(c));
+  return { shown, rest };
+}
+
+function modelCardHtml(card, selected) {
+  const badge = card.model_id === App.ctx.recommended_model_id ? '<span class="badge">RECOMENDADO</span>' : '';
+  const notViable = card.viable ? '' : ' not-viable';
+  const noteViable = card.viable ? '' : '<div class="meta">En tu equipo sería más lento que el propio audio.</div>';
+  return `
+    <label class="model-card${selected ? ' selected' : ''}${notViable}" data-model-id="${card.model_id}">
+      <input type="radio" name="b-model" value="${card.model_id}" ${selected ? 'checked' : ''}>
+      <div style="flex:1;">
+        <div class="head">${escapeHtml(card.quality_adjective)} ${badge}</div>
+        <div class="meta">${card.model_id} · ${escapeHtml(card.download_text)} de descarga${card.installed ? ' · ya instalado' : ''}</div>
+        <div class="meta">${escapeHtml(card.memory_text)}</div>
+        <div class="meta">${escapeHtml(card.speed_text)}</div>
+        ${noteViable}
+      </div>
+    </label>`;
+}
+
+let selectedModelB = null;
+
+function renderScreenB() {
+  const { shown, rest } = pickDefaultModelsForB();
+  selectedModelB = App.ctx.recommended_model_id || (shown[0] && shown[0].model_id);
+
+  el('b-model-list').innerHTML = shown.map((c) => modelCardHtml(c, c.model_id === selectedModelB)).join('');
+  el('b-model-list-more').innerHTML = rest.map((c) => modelCardHtml(c, c.model_id === selectedModelB)).join('');
+  el('b-model-list-more').classList.add('hidden');
+  App.moreModelsOpenB = false;
+  el('b-toggle-more').textContent = 'Ver más modelos ▾';
+
+  document.querySelectorAll('#screen-b .model-card').forEach((label) => {
+    label.addEventListener('click', () => {
+      selectedModelB = label.dataset.modelId;
+      document.querySelectorAll('#screen-b .model-card').forEach((l) => l.classList.toggle('selected', l.dataset.modelId === selectedModelB));
+    });
+  });
+
+  if (App.ctx.initial_source_path) {
+    el('b-initial-source').classList.remove('hidden');
+    el('b-initial-source').innerHTML = `${iconSvg('info')}<div class="body">Tras la descarga se transcribirá: <strong>${escapeHtml(App.ctx.initial_source_path.split('\\').pop())}</strong></div>`;
+  } else {
+    el('b-initial-source').classList.add('hidden');
+  }
+
+  el('b-models-dir').textContent = App.ctx.models_dir;
+  fmtBytes(App.ctx.disk_free_bytes).then((t) => { el('b-disk-free').textContent = t; });
+  const chip = App.ctx.device_chip;
+  el('b-device-chip').innerHTML = `${iconSvg(chip.icon)}<span>${escapeHtml(chip.label)}</span>`;
+  el('b-device-chip').className = 'chip ' + (chip.severity === 'ok' ? 'ok' : chip.severity === 'warn' ? 'warn' : '');
+
+  el('b-error').classList.add('hidden');
+  el('b-progress').classList.add('hidden');
+  el('b-download-btn').disabled = false;
+}
+
+el('b-toggle-more').addEventListener('click', () => {
+  App.moreModelsOpenB = !App.moreModelsOpenB;
+  el('b-model-list-more').classList.toggle('hidden', !App.moreModelsOpenB);
+  el('b-toggle-more').textContent = App.moreModelsOpenB ? 'Ver menos modelos ▴' : 'Ver más modelos ▾';
+});
+
+el('b-download-btn').addEventListener('click', async () => {
+  if (!selectedModelB) return;
+  el('b-error').classList.add('hidden');
+  el('b-download-btn').disabled = true;
+  try {
+    const started = await api('download_model', selectedModelB);
+    App.currentJobId = started.job_id;
+    App.jobKind = 'model_download';
+    el('b-progress').classList.remove('hidden');
+    pollDownload('b', started.job_id);
+  } catch (exc) {
+    el('b-download-btn').disabled = false;
+    showInlineError('b-error', exc);
+  }
+});
+
+el('b-cancel-download').addEventListener('click', async () => {
+  if (!App.currentJobId) return;
+  await api('cancel_job', App.currentJobId);
+});
+
+function showInlineError(bannerId, exc) {
+  const banner = el(bannerId);
+  banner.classList.remove('hidden');
+  const detail = exc && exc.apiError ? exc.apiError : null;
+  const text = detail ? (detail.technical || detail.code) : (exc && exc.message) || 'Algo ha fallado por dentro.';
+  banner.innerHTML = `${iconSvg('alert-triangle')}<div class="body">${escapeHtml(text)}</div>`;
+}
+
+async function pollDownload(context, jobId) {
+  // `jobId` viaja explicito (igual que `pollTranscription`): Panel F es
+  // accesible "en cualquier momento" (UI-SPEC.md Sec.2), incluso con una
+  // transcripcion corriendo en Pantalla D -- compartir `App.currentJobId`
+  // entre las dos rompería el sondeo de la transcripcion en curso. Pantalla B
+  // SI usa `App.currentJobId` (nunca coexiste con D: son pantallas excluyentes).
+  const prefix = context; // 'b' | 'f'
+  const tick = async () => {
+    const stillTracked = prefix === 'b' ? App.currentJobId === jobId : App.panelJobId === jobId;
+    if (!stillTracked) return;
+    let state;
+    try {
+      state = await api('get_job', jobId, null, 0);
+    } catch (exc) {
+      return;
+    }
+    const fillEl = el(prefix + '-progress-fill');
+    const textEl = el(prefix + '-progress-text');
+    if (state.total_bytes) {
+      const pct = state.progress != null ? Math.round(state.progress * 100) : 0;
+      fillEl.classList.remove('indeterminate');
+      fillEl.style.width = pct + '%';
+      const [downloaded, total] = await Promise.all([fmtBytes(state.downloaded_bytes), fmtBytes(state.total_bytes)]);
+      textEl.textContent = `${downloaded} de ${total} · ${pct} %`;
+    } else {
+      fillEl.classList.add('indeterminate');
+      textEl.textContent = 'calculando…';
+    }
+
+    if (state.state === 'done') {
+      if (prefix === 'b') App.currentJobId = null; else App.panelJobId = null;
+      App.ctx = await api('get_context');
+      renderHeader();
+      if (prefix === 'b') {
+        toast('Modelo descargado.');
+        await renderScreenC();
+        showScreen('c');
+        if (App.ctx.initial_source_path) await adoptFile(App.ctx.initial_source_path);
+      } else {
+        toast('Modelo descargado.');
+        el('f-progress').classList.add('hidden');
+        renderPanelF();
+      }
+      return;
+    }
+    if (state.state === 'cancelled') {
+      if (prefix === 'b') App.currentJobId = null; else App.panelJobId = null;
+      el(prefix + '-progress').classList.add('hidden');
+      if (prefix === 'b') el('b-download-btn').disabled = false;
+      toast('Cancelado.');
+      return;
+    }
+    if (state.state === 'error') {
+      if (prefix === 'b') App.currentJobId = null; else App.panelJobId = null;
+      el(prefix + '-progress').classList.add('hidden');
+      if (prefix === 'b') {
+        el('b-download-btn').disabled = false;
+        el('b-error').classList.remove('hidden');
+        const msg = state.ui && state.ui.error ? state.ui.error : { title: 'No he podido descargar el modelo.' };
+        el('b-error').innerHTML = `${iconSvg('alert-triangle')}<div class="body"><strong>${escapeHtml(msg.title)}</strong>${msg.hint ? '<br>' + escapeHtml(msg.hint) : ''}</div>`;
+      } else {
+        toast('No se pudo descargar el modelo.');
+      }
+      return;
+    }
+    setTimeout(tick, 1000);
+  };
+  tick();
+}
+
+/* ============================================================ Pantalla C: principal */
+async function renderScreenC() {
+  if (App.ctx.yt_dlp_unavailable_warning) {
+    el('c-ytdlp-warning').classList.remove('hidden');
+    el('c-ytdlp-warning').innerHTML = `${iconSvg('info')}<div class="body">${escapeHtml(App.ctx.yt_dlp_unavailable_warning)}</div>`;
+    el('c-url-input').disabled = true;
+    el('c-url-examine').disabled = true;
+  } else if (App.ctx.ytdlp_stale_warning) {
+    el('c-ytdlp-warning').classList.remove('hidden');
+    el('c-ytdlp-warning').innerHTML = `${iconSvg('info')}<div class="body">${escapeHtml(App.ctx.ytdlp_stale_warning)}</div>`;
+  } else {
+    el('c-ytdlp-warning').classList.add('hidden');
+  }
+
+  const select = el('c-model-select');
+  select.innerHTML = App.ctx.catalog
+    .filter((c) => c.installed)
+    .map((c) => `<option value="${c.model_id}">${c.model_id} — ${escapeHtml(c.quality_adjective)}</option>`)
+    .join('');
+  const preferred = App.ctx.settings.default_model_id || App.ctx.recommended_model_id;
+  if (preferred && [...select.options].some((o) => o.value === preferred)) select.value = preferred;
+
+  el('c-language-select').value = App.ctx.settings.language || '';
+  el('c-format-txt').checked = (App.ctx.settings.output_formats || ['txt', 'md']).includes('txt');
+  el('c-format-md').checked = (App.ctx.settings.output_formats || ['txt', 'md']).includes('md');
+
+  App.fileSource = null;
+  App.urlSource = null;
+  App.outputDirOverride = App.ctx.settings.output_dir || null;
+  el('c-origin-preview').classList.add('hidden');
+  el('c-url-preview').classList.add('hidden');
+  el('c-url-unavailable').classList.add('hidden');
+  el('c-destination').classList.add('hidden');
+  el('c-url-input').value = '';
+  el('c-url-inline-error').textContent = '';
+  updateTranscribeEnabled();
+}
+
+el('c-pick-file').addEventListener('click', async () => {
+  try {
+    const path = await api('pick_file');
+    if (path) await adoptFile(path);
+  } catch (exc) {
+    toast(exc.message || 'No se pudo abrir el selector de archivos.');
+  }
+});
+
+el('dropzone').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el('c-pick-file').click(); }
+});
+el('dropzone').addEventListener('dragover', (e) => { e.preventDefault(); el('dropzone').classList.add('dragover'); });
+el('dropzone').addEventListener('dragleave', () => el('dropzone').classList.remove('dragover'));
+el('dropzone').addEventListener('drop', (e) => { e.preventDefault(); el('dropzone').classList.remove('dragover'); });
+
+function bindDropHooks() {
+  // pywebview intercepta 'drop' a nivel de documento (webview.dom, ver app.py) y
+  // llama a esto con la ruta ABSOLUTA real -- el evento HTML5 nativo no la trae.
+  window.__v2tOnFileDropped = async (path, hadExtra) => {
+    if (App.screen !== 'c') return;
+    if (hadExtra && App.ctx && App.ctx.copy) toast(App.ctx.copy.drag_drop_multiple_files);
+    await adoptFile(path);
+  };
+}
+
+async function adoptFile(path) {
+  el('c-origin-preview').classList.remove('hidden');
+  el('c-origin-name').textContent = 'Comprobando…';
+  App.urlSource = null;
+  el('c-url-preview').classList.add('hidden');
+  el('c-url-unavailable').classList.add('hidden');
+  try {
+    const info = await api('probe_media', path);
+    App.fileSource = info;
+    const durationText = info.duration_seconds ? await fmtMmss(info.duration_seconds) : null;
+    const sizeText = await fmtBytes(info.size_bytes);
+    el('c-origin-name').textContent = `${info.display_name} · ${sizeText}` + (durationText ? ` · ${durationText}` : '');
+    el('c-origin-name').title = info.path;
+    updateDestinationLine();
+  } catch (exc) {
+    App.fileSource = null;
+    el('c-origin-preview').classList.add('hidden');
+    if (exc.apiError) {
+      showErrorCard(exc.apiError.code, exc.apiError.details, exc.apiError.technical, { returnToC: true });
+    } else {
+      toast(exc.message || 'No se pudo leer ese archivo.');
+    }
+  }
+  updateTranscribeEnabled();
+}
+
+el('c-origin-clear').addEventListener('click', () => {
+  App.fileSource = null;
+  el('c-origin-preview').classList.add('hidden');
+  updateDestinationLine();
+  updateTranscribeEnabled();
+});
+
+function defaultOutputDirFor(fileSource) {
+  if (!fileSource) return null;
+  const idx = Math.max(fileSource.path.lastIndexOf('\\'), fileSource.path.lastIndexOf('/'));
+  return idx > 0 ? fileSource.path.slice(0, idx) : fileSource.path;
+}
+
+function updateDestinationLine() {
+  const dir = App.outputDirOverride || defaultOutputDirFor(App.fileSource);
+  if (!dir) { el('c-destination').classList.add('hidden'); return; }
+  el('c-destination').classList.remove('hidden');
+  el('c-destination-path').textContent = dir;
+  el('c-destination-path').title = dir;
+}
+
+el('c-destination-change').addEventListener('click', async () => {
+  try {
+    const folder = await api('pick_folder');
+    if (folder) { App.outputDirOverride = folder; updateDestinationLine(); }
+  } catch (exc) {
+    toast(exc.message || 'No se pudo abrir el selector de carpetas.');
+  }
+});
+
+el('c-options-toggle').addEventListener('click', () => {
+  const panel = el('options-panel');
+  const open = panel.classList.toggle('open');
+  el('c-options-toggle').textContent = open ? 'Opciones ▴' : 'Opciones ▾';
+});
+
+el('c-url-examine').addEventListener('click', async () => {
+  const url = el('c-url-input').value.trim();
+  el('c-url-inline-error').textContent = '';
+  el('c-url-preview').classList.add('hidden');
+  if (!/^https?:\/\//i.test(url)) {
+    el('c-url-inline-error').textContent = App.ctx.copy.inline_unsupported_scheme;
+    return;
+  }
+  el('c-url-examine').disabled = true;
+  try {
+    const info = await api('probe_url', url);
+    App.urlSource = Object.assign({ url }, info);
+    App.fileSource = null;
+    el('c-origin-preview').classList.add('hidden');
+    const durationText = info.duration_seconds ? await fmtMmss(info.duration_seconds) : 'duración desconocida';
+    el('c-url-preview').classList.remove('hidden');
+    el('c-url-preview').innerHTML = `${iconSvg('link')}<span class="name">${escapeHtml(info.title)} · ${escapeHtml(durationText)} · ${escapeHtml(info.extractor)}</span>`;
+    el('c-url-unavailable').classList.remove('hidden');
+    el('c-url-unavailable').innerHTML = `${iconSvg('info')}<div class="body"><strong>${escapeHtml(App.ctx.copy.link_transcription_unavailable.title)}</strong><br>${escapeHtml(App.ctx.copy.link_transcription_unavailable.body)}</div>`;
+  } catch (exc) {
+    if (exc.apiError) {
+      showErrorCard(exc.apiError.code, exc.apiError.details, exc.apiError.technical, { returnToC: true });
+    } else {
+      el('c-url-inline-error').textContent = exc.message || 'No se pudo examinar ese enlace.';
+    }
+  } finally {
+    el('c-url-examine').disabled = false;
+  }
+  updateTranscribeEnabled();
+});
+el('c-url-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el('c-url-examine').click(); } });
+
+function updateTranscribeEnabled() {
+  const hasOrigin = !!App.fileSource;  // el origen de enlace no habilita Transcribir (brecha declarada)
+  const hasFormat = el('c-format-txt').checked || el('c-format-md').checked;
+  el('c-transcribe').disabled = !(hasOrigin && hasFormat);
+}
+el('c-format-txt').addEventListener('change', updateTranscribeEnabled);
+el('c-format-md').addEventListener('change', updateTranscribeEnabled);
+
+el('c-transcribe').addEventListener('click', async () => {
+  if (!App.fileSource) return;
+  const formats = [];
+  if (el('c-format-txt').checked) formats.push('txt');
+  if (el('c-format-md').checked) formats.push('md');
+  const source = { kind: 'file', path: App.fileSource.path };
+  const options = {
+    model_id: el('c-model-select').value,
+    device_preference: App.ctx.settings.device_preference || 'auto',
+    language: el('c-language-select').value || null,
+    vad_filter: App.ctx.settings.vad_filter !== false,
+    output_dir: App.outputDirOverride || defaultOutputDirFor(App.fileSource),
+    formats,
+  };
+  await beginTranscription(source, options);
+});
+
+async function beginTranscription(source, options) {
+  App.lastErrorContext = { source, options };
+  try {
+    const started = await api('start_transcription', source, options);
+    App.currentJobId = started.job_id;
+    App.jobKind = 'transcription';
+    App.transcriptSince = 0;
+    App.transcriptSegments = [];
+    App.lastPhase = null;
+    App.phaseStartedAt = Date.now();
+    App.cancelling = false;
+    renderScreenDShell(source);
+    showScreen('d');
+    pollTranscription();
+  } catch (exc) {
+    if (exc.apiError) {
+      showErrorCard(exc.apiError.code, exc.apiError.details, exc.apiError.technical);
+    } else {
+      toast(exc.message || 'No se pudo empezar la transcripción.');
+    }
+  }
+}
+
+/* ============================================================ Pantalla D: trabajando */
+const PHASE_ORDER = ['queued', 'loading_model', 'downloading_model', 'detecting_language', 'transcribing', 'writing'];
+
+function renderScreenDShell(source) {
+  const name = App.fileSource ? App.fileSource.display_name : (source && source.path ? source.path.split('\\').pop() : '');
+  el('d-origin-name').textContent = name;
+  el('d-origin-name').title = App.fileSource ? App.fileSource.path : '';
+  el('d-writing-warning').classList.add('hidden');
+  el('d-cancel-note').textContent = '';
+  el('d-cancel').textContent = 'Cancelar';
+  el('d-cancel').dataset.armed = '';
+  el('transcript-panel').classList.add('hidden');
+  el('transcript-content').innerHTML = '<div class="empty">El texto aparecerá aquí en cuanto empiece la transcripción.</div>';
+  el('transcript-jump').classList.remove('show');
+}
+
+function renderPhaseTrail(phase) {
+  const relevant = PHASE_ORDER.filter((p) => p !== 'downloading_model' || phase === 'downloading_model');
+  const currentIdx = relevant.indexOf(phase);
+  el('d-phase-trail').innerHTML = relevant
+    .map((p, i) => {
+      const cls = p === phase ? 'active' : (currentIdx >= 0 && i < currentIdx ? 'done' : '');
+      return `<span class="step ${cls}">${escapeHtml(phaseTitleFallback(p))}</span>`;
+    })
+    .join('');
+}
+function phaseTitleFallback(p) {
+  return (App.ctx.copy.phase_titles && App.ctx.copy.phase_titles[p]) || p;
+}
+
+async function pollTranscription() {
+  if (!App.currentJobId) return;
+  const jobId = App.currentJobId;
+  const now = Date.now();
+  if (App.lastPhase === null) App.phaseStartedAt = now;
+  const elapsedInPhase = (now - App.phaseStartedAt) / 1000;
+
+  let state;
+  try {
+    state = await api('get_job', jobId, App.transcriptSince, elapsedInPhase);
+  } catch (exc) {
+    setTimeout(pollTranscription, 1000);
+    return;
+  }
+  if (App.currentJobId !== jobId) return; // se cancelo/cambio de trabajo entretanto
+
+  if (state.phase !== App.lastPhase) {
+    App.phaseStartedAt = now;
+    App.lastPhase = state.phase;
+  }
+
+  renderPhaseTrail(state.phase);
+  await renderPhaseBody(state, elapsedInPhase);
+  appendNewSegments(state.new_segments || []);
+
+  if (state.state === 'running' || state.state === 'queued') {
+    setTimeout(pollTranscription, 1000);
+    return;
+  }
+
+  // terminal
+  App.currentJobId = null;
+  if (state.state === 'done') {
+    await renderScreenE(state);
+    showScreen('e');
+  } else if (state.state === 'cancelled') {
+    toast('Cancelado.');
+    await renderScreenC();
+    showScreen('c');
+  } else if (state.state === 'error') {
+    const err = state.error || {};
+    showErrorCard(err.code, err.details, err.technical);
+  }
+}
+
+async function renderPhaseBody(state, elapsedInPhase) {
+  const ui = state.ui || {};
+  el('d-title').textContent = ui.phase_title || '';
+  const chip = ui.device_chip;
+  if (chip) {
+    el('d-device-chip').classList.remove('hidden');
+    el('d-device-chip').innerHTML = `${iconSvg(chip.icon)}<span>${escapeHtml(chip.label)}</span>`;
+    el('d-device-chip').className = 'chip ' + (chip.severity === 'ok' ? 'ok' : chip.severity === 'warn' ? 'warn' : '');
+  } else {
+    el('d-device-chip').classList.add('hidden');
+  }
+
+  const showTranscript = state.phase === 'transcribing' || (App.transcriptSegments.length > 0);
+  el('transcript-panel').classList.toggle('hidden', !showTranscript);
+
+  if (state.phase === 'queued') {
+    el('d-queued-info').classList.remove('hidden');
+    el('d-progress-block').classList.add('hidden');
+    const posText = state.queue_position > 0 ? `Posición ${state.queue_position}` : 'Es el siguiente';
+    const waitText = state.estimated_wait_seconds != null ? await fmtMmss(state.estimated_wait_seconds) : 'calculando…';
+    el('d-queued-info').textContent = `${posText} · tiempo estimado ~${waitText}`;
+    setCancelState(state.phase, false);
+    return;
+  }
+  el('d-queued-info').classList.add('hidden');
+  el('d-progress-block').classList.remove('hidden');
+
+  const timerEl = el('d-timer');
+  const fillEl = el('d-bar-fill');
+  const left = el('d-bar-caption-left');
+  const right = el('d-bar-caption-right');
+  const hint = el('d-phase-hint');
+
+  if (state.phase === 'transcribing') {
+    timerEl.classList.add('hidden');
+    fillEl.classList.remove('indeterminate');
+    const pct = state.progress != null ? Math.round(state.progress * 100) : 0;
+    fillEl.style.width = pct + '%';
+    if (state.eta_seconds != null) {
+      const etaText = await fmtMmss(state.eta_seconds);
+      left.textContent = `${pct} % · quedan ~${etaText}`;
+    } else {
+      left.textContent = 'calculando…';
+    }
+    right.textContent = '';
+    hint.textContent = '';
+  } else if ((state.phase === 'downloading_model' || state.phase === 'fetching') && state.total_bytes) {
+    timerEl.classList.add('hidden');
+    fillEl.classList.remove('indeterminate');
+    const pct = state.progress != null ? Math.round(state.progress * 100) : 0;
+    fillEl.style.width = pct + '%';
+    const [downloaded, total] = await Promise.all([fmtBytes(state.downloaded_bytes), fmtBytes(state.total_bytes)]);
+    left.textContent = `${downloaded} de ${total} · ${pct} %`;
+    right.textContent = '';
+    hint.textContent = '';
+  } else {
+    // indeterminada: detecting_language, loading_model, writing, probing,
+    // fetching/downloading_model sin total_bytes todavia (o el caso transitorio
+    // de jobs.py: "downloading_model" antes de que MODEL_MISSING interrumpa la
+    // transcripcion, ver la nota de start_transcription en app.py)
+    timerEl.classList.remove('hidden');
+    timerEl.textContent = await fmtMmss(elapsedInPhase);
+    fillEl.classList.add('indeterminate');
+    left.textContent = '';
+    right.textContent = '';
+    if (state.phase === 'detecting_language') {
+      hint.textContent = ui.phase_hint || '';
+    } else if (state.phase === 'loading_model') {
+      hint.textContent = 'Suele tardar unos segundos.';
+    } else if (state.phase === 'writing') {
+      hint.textContent = 'Escribiendo el .txt y el .md.';
+    } else if (state.phase === 'probing') {
+      hint.textContent = 'Comprobando qué hay en ese enlace, sin descargar nada todavía.';
+    } else {
+      hint.textContent = '';
+    }
+  }
+
+  setCancelState(state.phase, App.cancelling);
+}
+
+function setCancelState(phase, cancelling) {
+  // No pisar el boton mientras esta "armado" (confirmacion ligera de 2 pasos en
+  // curso, Sec.13): sin este guard, el siguiente sondeo (cada 1 s) lo devolveria
+  // a "Cancelar" antes de que la persona llegue a confirmar el segundo clic.
+  if (el('d-cancel').dataset.armed !== 'writing') {
+    api('cancel_button_text', phase, cancelling).then((info) => {
+      el('d-cancel').textContent = info.label;
+      el('d-cancel-note').textContent = info.note || '';
+      el('d-cancel').disabled = cancelling;
+    });
+  }
+  el('d-writing-warning').classList.toggle('hidden', phase !== 'writing');
+}
+
+el('d-cancel').addEventListener('click', async () => {
+  if (!App.currentJobId) return;
+  if (App.lastPhase === 'writing' && el('d-cancel').dataset.armed !== 'writing') {
+    el('d-cancel').dataset.armed = 'writing';
+    el('d-cancel').textContent = '¿Seguro? → Cancelar';
+    setTimeout(() => {
+      if (el('d-cancel').dataset.armed === 'writing') { el('d-cancel').dataset.armed = ''; el('d-cancel').textContent = 'Cancelar'; }
+    }, 3000);
+    return;
+  }
+  App.cancelling = true;
+  el('d-cancel').disabled = true;
+  try {
+    await api('cancel_job', App.currentJobId);
+  } catch (exc) {
+    // Solo se reactiva si la peticion de cancelar fallo de verdad: si tuvo
+    // exito, se queda deshabilitado hasta que el trabajo termine (Sec.9).
+    App.cancelling = false;
+    el('d-cancel').disabled = false;
+  }
+});
+
+/* ---- panel de transcripcion en vivo ---- */
+function onTranscriptScroll() {
+  const p = el('transcript-panel');
+  const atBottom = p.scrollHeight - p.scrollTop - p.clientHeight < 24;
+  App.transcriptUserScrolledUp = !atBottom;
+  el('transcript-jump').classList.toggle('show', App.transcriptUserScrolledUp && App.transcriptSegments.length > 0);
+}
+el('transcript-panel').addEventListener('scroll', onTranscriptScroll);
+el('transcript-jump').addEventListener('click', scrollTranscriptToBottom);
+function scrollTranscriptToBottom() {
+  const p = el('transcript-panel');
+  p.scrollTop = p.scrollHeight;
+  App.transcriptUserScrolledUp = false;
+  el('transcript-jump').classList.remove('show');
+}
+
+async function appendNewSegments(newSegments) {
+  if (!newSegments.length) return;
+  const emptyState = el('transcript-content').querySelector('.empty');
+  if (emptyState) emptyState.remove();
+  for (const seg of newSegments) {
+    App.transcriptSegments.push(seg);
+    App.transcriptSince = Math.max(App.transcriptSince, seg.index + 1);
+    const ts = await fmtMmss(seg.start);
+    const line = document.createElement('div');
+    line.className = 'segment-line';
+    line.innerHTML = `<span class="ts mono">[${ts}]</span><span>${escapeHtml(seg.text)}</span>`;
+    el('transcript-content').appendChild(line);
+  }
+  if (!App.transcriptUserScrolledUp) scrollTranscriptToBottom();
+  else el('transcript-jump').classList.add('show');
+}
+
+/* ============================================================ Pantalla E: resultado */
+async function renderScreenE(state) {
+  const result = state.result || {};
+  const durationText = state.media_duration_seconds ? await fmtMmss(state.media_duration_seconds) : null;
+  const probText = result.language_probability != null ? await fmtPercent(result.language_probability) : null;
+  const originName = (App.fileSource && App.fileSource.display_name) || (state.source && state.source.display_name) || '';
+  el('e-summary').textContent = [originName, durationText, result.language ? `idioma detectado: ${result.language}${probText ? ' (' + probText + ')' : ''}` : null]
+    .filter(Boolean).join(' · ');
+
+  const ui = state.ui || {};
+  if (ui.fallback_warning) {
+    el('e-fallback-warning').classList.remove('hidden');
+    el('e-fallback-warning').innerHTML = `${iconSvg('info')}<div class="body">${escapeHtml(ui.fallback_warning.title)}</div>`;
+  } else {
+    el('e-fallback-warning').classList.add('hidden');
+  }
+  if (ui.language_confidence_warning) {
+    el('e-confidence-warning').classList.remove('hidden');
+    el('e-confidence-warning').innerHTML = `${iconSvg('alert-triangle')}<div class="body">${escapeHtml(ui.language_confidence_warning)}</div>`;
+  } else {
+    el('e-confidence-warning').classList.add('hidden');
+  }
+
+  const outputs = result.outputs || [];
+  const rows = await Promise.all(outputs.map(async (o) => {
+    const size = await fmtBytes(o.bytes);
+    return `<div class="origin-preview"><span class="mono name">${escapeHtml(o.path.split('\\').pop())} · ${size}</span><button class="secondary open-output" data-path="${escapeHtml(o.path)}" type="button">Abrir carpeta</button></div>`;
+  }));
+  el('e-outputs').innerHTML = rows.join('');
+  el('e-outputs').querySelectorAll('.open-output').forEach((btn) => {
+    btn.addEventListener('click', () => api('open_folder', btn.dataset.path));
+  });
+
+  const elapsedText = result.elapsed_seconds != null ? await fmtMmss(result.elapsed_seconds) : '';
+  const device = state.device_used || {};
+  el('e-process-time').textContent = `Tiempo de proceso: ${elapsedText} · ${device.device === 'cuda' ? 'GPU' : 'CPU'} (${state.options ? state.options.model_id : ''}, ${device.compute_type || ''})`;
+
+  const panel = el('transcript-panel-result');
+  panel.innerHTML = '';
+  panel.style.maxHeight = '260px';
+  panel.style.overflowY = 'auto';
+  panel.style.border = '1px solid var(--line)';
+  panel.style.borderRadius = '10px';
+  panel.style.background = 'var(--panel-2)';
+  panel.style.padding = '10px';
+  for (const seg of App.transcriptSegments) {
+    const ts = await fmtMmss(seg.start);
+    const line = document.createElement('div');
+    line.className = 'segment-line';
+    line.innerHTML = `<span class="ts mono">[${ts}]</span><span>${escapeHtml(seg.text)}</span>`;
+    panel.appendChild(line);
+  }
+}
+
+el('e-transcribe-another').addEventListener('click', async () => {
+  await renderScreenC();
+  showScreen('c');
+});
+
+/* ============================================================ Tarjeta de error a pantalla completa */
+async function computeErrorMessage(code, details) {
+  try {
+    return await api('error_message', code, details || {});
+  } catch (e) {
+    return { code, title: 'Algo ha fallado por dentro.', hint: 'Detalle técnico abajo.', primary: ['Reintentar', 'retry'], secondary: null, surface: 'card' };
+  }
+}
+
+async function showErrorCard(code, details, technical, opts) {
+  opts = opts || {};
+  let msg;
+  try {
+    msg = await computeErrorMessage(code, details);
+  } catch (e) {
+    msg = { title: 'Algo ha fallado por dentro.', hint: 'Detalle técnico abajo.', primary: ['Reintentar', 'retry'], secondary: null, surface: 'card' };
+  }
+
+  if (msg.surface === 'toast') {
+    toast(msg.title);
+    return;
+  }
+  if (msg.surface === 'neutral') {
+    toast(msg.title);
+    if (App.screen === 'd') { await renderScreenC(); showScreen('c'); }
+    return;
+  }
+
+  el('err-title').textContent = msg.title;
+  el('err-hint').textContent = msg.hint || '';
+  if (technical) {
+    el('err-technical-wrap').classList.remove('hidden');
+    el('err-technical').textContent = technical;
+  } else {
+    el('err-technical-wrap').classList.add('hidden');
+  }
+
+  setupErrorButton('err-primary', msg.primary);
+  setupErrorButton('err-secondary', msg.secondary);
+
+  showScreen('error');
+};
+
+function setupErrorButton(elId, spec) {
+  const btn = el(elId);
+  if (!spec) { btn.classList.add('hidden'); btn.onclick = null; return; }
+  const [label, action] = spec;
+  btn.classList.remove('hidden');
+  btn.textContent = label;
+  btn.onclick = () => runErrorAction(action);
+}
+
+async function runErrorAction(action) {
+  if (action === 'choose_file') {
+    await renderScreenC();
+    showScreen('c');
+    el('c-pick-file').click();
+    return;
+  }
+  if (action === 'restart') {
+    await renderScreenC();
+    showScreen('c');
+    return;
+  }
+  if (action === 'retry') {
+    if (App.lastErrorContext) { await beginTranscription(App.lastErrorContext.source, App.lastErrorContext.options); }
+    else { await renderScreenC(); showScreen('c'); }
+    return;
+  }
+  if (action === 'retry_cpu') {
+    if (App.lastErrorContext) {
+      const opts = Object.assign({}, App.lastErrorContext.options, { device_preference: 'cpu' });
+      await beginTranscription(App.lastErrorContext.source, opts);
+    }
+    return;
+  }
+  if (action === 'go_to_options') {
+    await renderScreenC();
+    showScreen('c');
+    el('options-panel').classList.add('open');
+    el('c-options-toggle').textContent = 'Opciones ▴';
+    return;
+  }
+  if (action === 'go_to_models') {
+    openPanel('f');
+    return;
+  }
+  if (action === 'open_source_url') {
+    const url = (App.lastErrorContext && App.lastErrorContext.source && App.lastErrorContext.source.url) || (App.urlSource && App.urlSource.url);
+    if (url) api('open_external', url);
+    return;
+  }
+  if (action === 'copy_technical') {
+    const text = el('err-technical').textContent;
+    await copyToClipboard(text);
+    return;
+  }
+  if (action && action.startsWith('copy:')) {
+    await copyToClipboard(action.slice(5));
+    return;
+  }
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Copiado.');
+  } catch (e) {
+    toast('No se pudo copiar.');
+  }
+}
+
+/* ============================================================ Paneles F (modelos) y G (ajustes) */
+let lastFocusedBeforeOverlay = null;
+
+function openPanel(name) {
+  lastFocusedBeforeOverlay = document.activeElement;
+  el('overlay-backdrop').classList.add('show');
+  el('panel-' + name).classList.add('show');
+  if (name === 'f') renderPanelF();
+  if (name === 'g') renderPanelG();
+  const focusable = el('panel-' + name).querySelector('button, input, select, [tabindex]');
+  if (focusable) focusable.focus();
+  document.addEventListener('keydown', trapFocusHandler, true);
+}
+function closePanel(name) {
+  el('overlay-backdrop').classList.remove('show');
+  el('panel-' + name).classList.remove('show');
+  document.removeEventListener('keydown', trapFocusHandler, true);
+  if (lastFocusedBeforeOverlay) lastFocusedBeforeOverlay.focus();
+}
+function openPanelName() {
+  if (el('panel-f').classList.contains('show')) return 'f';
+  if (el('panel-g').classList.contains('show')) return 'g';
+  return null;
+}
+function trapFocusHandler(e) {
+  const name = openPanelName();
+  if (!name) return;
+  if (e.key === 'Escape') { e.preventDefault(); closePanel(name); return; }
+  if (e.key !== 'Tab') return;
+  const panel = el('panel-' + name);
+  const focusables = [...panel.querySelectorAll('button, input, select, a[href]')].filter((n) => !n.disabled && n.offsetParent !== null);
+  if (!focusables.length) return;
+  const first = focusables[0], last = focusables[focusables.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+
+document.querySelectorAll('.panel-close').forEach((btn) => btn.addEventListener('click', () => closePanel(btn.dataset.panel)));
+el('overlay-backdrop').addEventListener('click', () => { const n = openPanelName(); if (n) closePanel(n); });
+el('btn-open-models').addEventListener('click', () => openPanel('f'));
+el('btn-open-settings').addEventListener('click', () => openPanel('g'));
+
+function bindGlobalKeys() {
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const panel = openPanelName();
+      if (panel) { closePanel(panel); return; }
+      if (el('options-panel').classList.contains('open')) {
+        el('options-panel').classList.remove('open');
+        el('c-options-toggle').textContent = 'Opciones ▾';
+      }
+    }
+  });
+}
+
+async function renderPanelF() {
+  const total = await fmtBytes(App.ctx.models_total_bytes);
+  el('f-total').textContent = `Ocupan ${total} en total`;
+  const installedCards = App.ctx.catalog.filter((c) => c.installed);
+  const rows = await Promise.all(installedCards.map(async (c) => {
+    return `<div class="row between card" data-model-id="${c.model_id}">
+      <div><div><strong>${c.model_id}</strong> — ${escapeHtml(c.quality_adjective)}</div>
+      <div class="small muted">${escapeHtml(await fmtBytes(c.installed_bytes))}</div></div>
+      <button class="secondary f-delete" data-model-id="${c.model_id}" type="button">Borrar</button>
+    </div>`;
+  }));
+  el('f-installed-list').innerHTML = rows.join('');
+  el('f-installed-list').querySelectorAll('.f-delete').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.armed !== '1') {
+        btn.dataset.armed = '1';
+        btn.textContent = '¿Seguro? → Borrar';
+        setTimeout(() => { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = 'Borrar'; } }, 3000);
+        return;
+      }
+      btn.disabled = true;
+      try {
+        await api('delete_model', btn.dataset.modelId);
+        App.ctx = await api('get_context');
+        renderHeader();
+        renderPanelF();
+      } catch (exc) {
+        toast(exc.message || 'No se pudo borrar el modelo.');
+        btn.disabled = false;
+      }
+    });
+  });
+
+  const notInstalled = App.ctx.catalog.filter((c) => !c.installed);
+  const addRows = await Promise.all(notInstalled.map(async (c) => `
+    <div class="row between card">
+      <div><div><strong>${c.model_id}</strong> — ${escapeHtml(c.quality_adjective)}</div>
+      <div class="small muted">${escapeHtml(c.download_text)} · ${escapeHtml(c.speed_text)}</div></div>
+      <button class="secondary f-add" data-model-id="${c.model_id}" type="button">Descargar</button>
+    </div>`));
+  el('f-add-list').innerHTML = addRows.join('');
+  el('f-add-list').querySelectorAll('.f-add').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        const started = await api('download_model', btn.dataset.modelId);
+        App.panelJobId = started.job_id;
+        el('f-progress').classList.remove('hidden');
+        el('f-progress-title').textContent = `Descargando ${btn.dataset.modelId}…`;
+        pollDownload('f', started.job_id);
+      } catch (exc) {
+        toast(exc.message || 'No se pudo empezar la descarga.');
+      }
+    });
+  });
+}
+el('f-toggle-add').addEventListener('click', () => {
+  App.moreModelsOpenF = !App.moreModelsOpenF;
+  el('f-add-list').classList.toggle('hidden', !App.moreModelsOpenF);
+  el('f-toggle-add').textContent = App.moreModelsOpenF ? '+ Añadir otro modelo ▴' : '+ Añadir otro modelo ▾';
+});
+el('f-cancel-download').addEventListener('click', () => { if (App.panelJobId) api('cancel_job', App.panelJobId); });
+
+function renderPanelG() {
+  const s = App.ctx.settings;
+  el('g-language').value = s.language || '';
+  const formats = s.output_formats || ['txt', 'md'];
+  el('g-format-txt').checked = formats.includes('txt');
+  el('g-format-md').checked = formats.includes('md');
+  el('g-output-dir').textContent = s.output_dir || 'junto al origen';
+  el('g-output-dir').title = s.output_dir || '';
+  el('g-device-preference').value = s.device_preference || 'auto';
+  el('g-vad-filter').checked = s.vad_filter !== false;
+}
+el('g-output-dir-pick').addEventListener('click', async () => {
+  const folder = await api('pick_folder');
+  if (folder) { el('g-output-dir').textContent = folder; el('g-output-dir').title = folder; el('g-output-dir').dataset.picked = folder; }
+});
+el('g-save').addEventListener('click', async () => {
+  const formats = [];
+  if (el('g-format-txt').checked) formats.push('txt');
+  if (el('g-format-md').checked) formats.push('md');
+  if (!formats.length) formats.push('txt');
+  const overrides = {
+    language: el('g-language').value || null,
+    output_formats: formats,
+    output_dir: el('g-output-dir').dataset.picked || App.ctx.settings.output_dir || null,
+    device_preference: el('g-device-preference').value,
+    vad_filter: el('g-vad-filter').checked,
+  };
+  try {
+    App.ctx.settings = await api('save_settings', overrides);
+    toast('Ajustes guardados.');
+    closePanel('g');
+  } catch (exc) {
+    toast(exc.message || 'No se pudieron guardar los ajustes.');
+  }
+});
+
+/* ============================================================ arranque real */
+boot();
+</script>
+</body>
+</html>
