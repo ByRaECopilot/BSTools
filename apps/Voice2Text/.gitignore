@@ -26,3 +26,8 @@ serve-token.txt
 *.lnk
 
 __pycache__/
+
+# Entornos virtuales de desarrollo. Nunca se versionan: pesan cientos de MB y
+# son especificos de cada maquina. Se recrean con `pip install -r requirements.txt`.
+.venv*/
+venv/
