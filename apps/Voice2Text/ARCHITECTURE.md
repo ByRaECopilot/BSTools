@@ -134,7 +134,10 @@ class CoreError(Exception):
 class Segment:
     index: int          # 0,1,2... correlativo
     start: float        # segundos desde el inicio del medio
-    end: float
+    end: float          # fin del CONTENEDOR del segmento. OJO: faster-whisper lo ESTIRA
+                        # hasta el inicio del siguiente, absorbiendo el silencio (medido)
+    speech_end: float | None   # fin real del habla = end de la ULTIMA PALABRA.
+                        # None si word_timestamps=False. Es el unico campo que ve los silencios
     text: str           # ya recortado
 
 @dataclass(frozen=True)
@@ -157,7 +160,9 @@ bot la duplicaría por tercera vez. La cáscara pasa como mucho una **preferenci
 ```python
 @dataclass(frozen=True)
 class DeviceCapabilities:            # lo que HAY en la maquina. Barato, sin cargar modelo
-    cuda_available: bool
+    cuda_status: str                 # "unavailable" | "probable" | "confirmed"  (ADR-0002 E9)
+                                     # NUNCA un bool: "se construyo el modelo" NO prueba que
+                                     # la GPU funcione (medido). Ver la prueba de humo, abajo.
     cuda_device_count: int
     gpu_name: str | None                          # "NVIDIA GeForce GTX 1050 Ti"
     compute_capability: tuple[int, int] | None    # (6, 1) en Pascal
@@ -166,8 +171,9 @@ class DeviceCapabilities:            # lo que HAY en la maquina. Barato, sin car
     supported_compute_types: list[str]            # p.ej. ["int8", "float32"] en cc 6.1
     unavailable_reason: str | None                # CODIGO estable, nunca texto:
                                                   # "no_nvidia_gpu" | "cuda_libs_missing"
-                                                  # | "cuda_libs_mismatch" | "compute_capability_too_low"
-                                                  # | "insufficient_vram"
+                                                  # | "cuda_libs_not_on_path" | "cuda_libs_mismatch"
+                                                  # | "compute_capability_too_low" | "insufficient_vram"
+                                                  # | "smoke_test_failed"
 
 @dataclass(frozen=True)
 class DeviceChoice:
@@ -178,12 +184,29 @@ class DeviceChoice:
     fell_back_from: str | None   # "cuda" si se pidio GPU y se acabo en CPU
     fallback_reason: str | None  # mismo vocabulario que unavailable_reason
 
+def add_cuda_dlls_to_path() -> list[Path]: ...
+    # OBLIGATORIO ANTES de importar ctranslate2 (ADR-0002 E7). pip deja las DLL en
+    # site-packages/nvidia/*/bin y NO las publica en el PATH: sin este paso el sintoma
+    # es IDENTICO a no tenerlas instaladas, con pip diciendo que todo fue bien.
+    # Consecuencia: faster_whisper y ctranslate2 se importan DE FORMA PEREZOSA,
+    # dentro de las funciones. Mismo patron que el import perezoso de yt_dlp (D7).
+
 def probe_devices() -> DeviceCapabilities: ...
-    # LA UNICA funcion que toca hardware. NO importa CUDA de forma ansiosa:
-    # ImportError / OSError de DLL ausente -> cuda_available=False con su codigo.
-    # Mismo cortafuegos que yt-dlp (ADR-0001 D7), aplicado a la 2a dependencia opcional.
-    # supported_compute_types SE PREGUNTA a la libreria
-    # (ctranslate2.get_supported_compute_types), NO se deduce de una tabla nuestra.
+    # Comprobaciones BARATAS. Devuelve como mucho "probable", NUNCA "confirmed".
+    #   1. ctranslate2.get_cuda_device_count() > 0
+    #   2. que los ficheros DLL EXISTAN en site-packages/nvidia/*/bin  <- tapa el caso
+    #      "instalado pero no en el PATH", que da el mismo error que "no instalado"
+    #   3. ctranslate2.get_supported_compute_types('cuda', 0)   <- se PREGUNTA a la
+    #      libreria; jamas una tabla de compute capability escrita por nosotros
+    # ImportError / OSError -> cuda_status="unavailable" con su codigo.
+
+def smoke_test_cuda(model: object) -> tuple[bool, str | None]: ...
+    # LA UNICA comprobacion fiable (ADR-0002 E8). Inferencia sobre medio segundo de
+    # audio sintetico generado en memoria, envuelta en try/except RuntimeError.
+    # Se clasifica por subcadena del mensaje:
+    #   "not found or cannot be loaded" -> gpu_libraries_missing
+    #   "out of memory"                 -> gpu_out_of_memory
+    #   resto                           -> gpu_unavailable
 
 def resolve_device(model_id: str, caps: DeviceCapabilities,
                    preference: str = "auto",
@@ -199,10 +222,19 @@ def resolve_device(model_id: str, caps: DeviceCapabilities,
 2. Con CUDA disponible, se elige el **primer `compute_type` soportado** de esta lista, **consultando el
    conjunto que devuelve CTranslate2**, no una tabla nuestra: `float16` → `int8_float16` → `int8` →
    `float32`. En CPU: `int8` → `float32`.
-3. Se exige `vram_free_mb >= min_vram_mb(model, compute_type) * 1.15`. Si no cabe, se prueba el siguiente
+3. Se exige que **tras cargar queden al menos 512 MiB libres**:
+   `vram_free_mb - vram_peak_mb(model, compute_type) >= 512`. Si no, se prueba el siguiente
    `compute_type`; si ninguno cabe, **CPU** con motivo `insufficient_vram`.
 4. **La VRAM se vuelve a comprobar al cargar el modelo, no solo al sondear**: entre el sondeo y la carga el
-   usuario puede haber abierto un juego.
+   usuario puede haber abierto un juego. Y `vram_free_mb` **se lee en el momento**, nunca se calcula
+   restando de la capacidad nominal: el escritorio de Windows ya ocupa ~460 MiB [M-dev].
+
+> **Por qué la holgura es absoluta y no un porcentaje (ADR-0002 §7).** Medido: `medium`/`float32` subió a
+> **3881-3927 MiB de 4096** y, pasados 13 minutos, **ni terminó ni lanzó excepción** — degradación
+> silenciosa, probablemente *spillover* a memoria compartida por PCIe [O]. **Quedarse justo por debajo del
+> límite es PEOR que pasarse**: pasarse da un `CUDA out of memory` capturable; quedarse al borde no da nada
+> que capturar ni nada que enseñar. Un porcentaje falla en los dos extremos (15 % de 4 GiB son 600 MiB,
+> justos; 15 % de 10 GiB son 1,5 GiB, desperdicio); un mínimo absoluto encaja en las dos tarjetas.
 
 **Por qué el orden de la regla 2 es ese y no "el más rápido primero":** la prioridad declarada por el dueño
 es la **calidad del texto**, así que **no se cuantiza más de lo que el hardware obligue**. En una Ampere
@@ -219,9 +251,14 @@ class ModelRecommendation:
     reason: str              # codigo estable: "best_quality_fits_vram" | "budget_limited" | "cpu_only"
     estimated_speed_ratio: float | None   # None si no hay medicion para ese perfil
 
-def recommend_profile(caps: DeviceCapabilities, catalog: dict[str, ModelSpec], *,
-                      model_budget_bytes: int | None) -> list[ModelRecommendation]: ...
+def recommend_profile(caps: DeviceCapabilities,
+                      catalog: dict[str, ModelSpec]) -> list[ModelRecommendation]: ...
     # Lista ORDENADA de candidatos. SUGIERE, nunca actua.
+    # 1) FILTRO DE VIABILIDAD: speed_ratio estimado >= min_viable_speed_ratio (1.0), y
+    #    en GPU, holgura de 512 MiB tras el pico. Si NINGUNO pasa -> se devuelve el mas
+    #    rapido, nunca una lista vacia.
+    # 2) ORDEN por calidad; a igualdad, por velocidad; a igualdad de ambas, por peso.
+    # Ya NO recibe model_budget_bytes: el techo murio (ADR-0002 E3).
 ```
 
 > **Aquí me aparto del encargo, a propósito.** Se pidió que `resolve_device()` resolviera *también el
@@ -251,6 +288,7 @@ def load_model(model_id: str, models_dir: Path, choice: DeviceChoice,
 def transcribe(media_path: Path, model: object, *,
                language: str | None = None,      # None = deteccion automatica
                vad_filter: bool = True,
+               word_timestamps: bool = True,     # rellena Segment.speech_end. Ver 7
                on_segment: Callable[[Segment, float], None],   # (segmento, progreso 0..1)
                should_cancel: Callable[[], bool]) -> TranscriptionResult: ...
 ```
@@ -387,11 +425,16 @@ class ModelSpec:
     repo_id: str             # "Systran/faster-whisper-small"
     expected_bytes: int      # small: 486_539_264 aprox (464 MB medidos [M])
     params_millions: int
-    recommended: bool          # cual es el por defecto -> lo fija ADR-0002
-    over_model_budget: bool    # supera el PRESUPUESTO DE MODELO (~1 GB "y un poco mas")
-    min_vram_mb: int | None    # para resolve_device(): si no cabe, no se elige cuda
+    quality_rank: int                  # 1 = mejor. ORDINAL y [E]: nunca se ha medido
+                                       # calidad en espanol. Deuda declarada (ADR-0002 V6)
+    vram_peak_mb: dict[str, int]       # por compute_type, MEDIDO: {"int8": 1575, ...}
+    speed_ratio: dict[str, float]      # por (dispositivo, compute_type), MEDIDO donde exista
 
 CATALOG: dict[str, ModelSpec]   # sin `tiny`, sin modelos `.en`, sin variantes distil (solo ingles)
+                                # Repos y cifras medidas: ADR-0002 seccion 3.
+                                # OJO: large-v3-turbo NO tiene repo de Systran; el de
+                                # referencia es mobiuslabsgmbh/faster-whisper-large-v3-turbo,
+                                # tambien fp16 (nunca un pre-cuantizado int8).
 
 def installed(models_dir: Path) -> dict[str, int]: ...      # model_id -> bytes en disco
 def ensure_model(model_id, models_dir, *, on_progress, should_cancel) -> Path: ...
@@ -399,14 +442,16 @@ def delete_model(model_id: str, models_dir: Path) -> int: ...   # bytes liberado
 def total_size(models_dir: Path) -> int: ...
 ```
 
-`ModelSpec` **no lleva etiquetas** como "recomendado" o "más ligero": lleva banderas. El adjetivo lo pone
+`ModelSpec` **no lleva etiquetas** como "recomendado" o "más ligero", ni una bandera `recommended`: **cuál
+es el recomendado depende del hardware** y lo calcula `recommend_profile()`. El adjetivo lo pone
 `messages.py`.
 
-> 🚫 **Cambio de semántica del 2026-08-10.** El campo se llamaba `exceeds_ceiling` y medía contra un techo
-> de **instalación** de 1 GB que **nunca existió**: el presupuesto de 1 GB —"y un poco más"— es **del
-> modelo**. Ahora es `over_model_budget`. **Qué modelo entra en el catálogo, cuál es el por defecto y
-> dónde cae exactamente la raya la decide ADR-0002**, junto con la GPU. `min_vram_mb` es nuevo: sin él,
-> `resolve_device()` no puede saber si un modelo cabe en los 4 GB de la tarjeta.
+> **Historia de este `dataclass`, para que nadie reintroduzca lo muerto.** Tuvo un campo `exceeds_ceiling`,
+> luego `over_model_budget`, que medían contra un techo de 1 GB. **Ese techo era orientativo y ya no existe
+> como restricción** (ADR-0002 E3): quedó sustituido por la obligación de transparencia. **Dejar un campo
+> que ya nadie hace cumplir es peor que quitarlo: invita a volver a aplicarlo.** También cayó
+> `recommended: bool`, por la misma razón de fondo: era una propiedad estática para algo que depende de la
+> máquina.
 
 ---
 
@@ -574,7 +619,9 @@ Sin reintento automático. Reintentar es crear un trabajo nuevo.
 | `model_download_failed` | falla la descarga del modelo | `model_id`, `downloaded_bytes` | "No he podido descargar el modelo." | "Comprueba la conexión; se reanuda donde se quedó." | **sí** |
 | `disk_full` | `OSError` de espacio o comprobación previa | `required_bytes`, `available_bytes`, `path` | "No queda espacio en disco." | "Hacen falta X MB libres en \<ruta\>." | sí |
 | `queue_full` | la cola llegó a `max_queued_jobs` | `queued`, `limit` | "Hay demasiados trabajos esperando." | "Espera a que terminen o cancela alguno." | sí |
-| `gpu_out_of_memory` | CUDA se queda sin VRAM **a mitad del trabajo** (el usuario abrió un juego) | `vram_free_mb`, `required_mb`, `model_id` | "La GPU se ha quedado sin memoria." | "Reintentar en CPU" (botón). **No se reintenta solo**: sería multiplicar el tiempo en silencio | sí, en CPU |
+| `gpu_out_of_memory` | el `RuntimeError` contiene **`"out of memory"`** | `vram_free_mb`, `required_mb`, `model_id` | "La GPU se ha quedado sin memoria." | "Reintentar en CPU" (botón) o elegir un modelo menor. **No se reintenta solo**: sería multiplicar el tiempo en silencio | sí, en CPU |
+| `gpu_libraries_missing` | el `RuntimeError` contiene **`"not found or cannot be loaded"`** | `library`, `expected_path` | "Falta el complemento de GPU, o sus librerías no se encuentran." | "Ejecuta `install-gpu.ps1`. Se ha transcrito con la CPU." | sí |
+| `gpu_unavailable` | **cubo por defecto de CUDA**: cualquier otro `RuntimeError` de la ruta GPU | `technical` | "No se ha podido usar la GPU." | "Se ha transcrito con la CPU; el detalle está abajo." | sí |
 | `cancelled` | lo paró quien llamó | — | "Cancelado." | — | sí |
 | `internal` | **cubo por defecto global** | — | "Algo ha fallado por dentro." | "Detalle técnico abajo." | sí |
 
@@ -687,11 +734,54 @@ libera al morir el proceso, aunque muera a lo bruto— garantiza un único proce
 
 ### Agrupación en párrafos (igual para los dos formatos)
 
+> **Corrección del 2026-08-10, a partir de un hallazgo del lote 1 verificado experimentalmente.** La regla
+> 1 estaba escrita sobre una suposición falsa: **`segment.end` NO marca el fin del habla**. faster-whisper
+> **lo estira hasta el inicio del segmento siguiente**, absorbiendo el silencio. Con 3,5 s de silencio real
+> insertado, el hueco medido entre `end` y el `start` siguiente fue **0** — también con `vad_filter=False`.
+> Con `word_timestamps=True`, el `end` de la **última palabra** sí lo refleja (11,82 s frente a 16,1 s:
+> hueco real de ~4,3 s). Por eso existe `Segment.speech_end` (§3), separado de `end`: **sobrecargar `end`
+> habría escondido el problema en vez de nombrarlo.**
+
 Se abre párrafo nuevo cuando se cumple **cualquiera** de estas:
 
-1. Hay un **hueco > 2,0 s** entre el fin de un segmento y el inicio del siguiente.
+1. Hay un **hueco > `paragraph_gap_seconds`** (2,0 s por defecto, configurable) entre el
+   **`speech_end`** de un segmento y el `start` del siguiente. **Se calcula con `speech_end`, nunca con
+   `end`.** Si `speech_end` es `None` (word timestamps desactivados), **esta regla se desactiva entera**:
+   no se finge un hueco que no se puede medir.
 2. El párrafo lleva **≥ 400 caracteres** y el último segmento acaba en `.`, `?`, `!` o `…`.
 3. El párrafo llega a **700 caracteres** (corte duro).
+
+**Qué pasa exactamente sin la regla 1, para dimensionar bien el problema:** las reglas 2 y 3 siguen
+funcionando, y la 3 **acota todo párrafo en 700 caracteres ≈ 9 líneas**. Así que el fallo **no** es un muro
+de veinte líneas — eso ya lo impedía el corte duro. El fallo real es más sutil y también inaceptable:
+**los cortes caen donde coincidan 400 caracteres con un punto, no donde el hablante hizo una pausa.** El
+`.md` con marcas de tiempo es una de las dos salidas del MVP; que sus párrafos no sigan el ritmo del
+hablante es una entrega pobre.
+
+**Decisión: `word_timestamps=True` por defecto** (ADR-0001 §17.4: calidad primero, velocidad después),
+**con la medición del coste como requisito, no como seguimiento** — igual que todo lo demás en este
+proyecto. Coste esperado **+10-30 % de tiempo de proceso [E]**, con una advertencia sobre mí mismo: mis
+estimaciones de rendimiento en este proyecto han salido **1,5-2× optimistas**. **Medido en el lote 1.b
+(V3, tabla de abajo): el coste real salió en la dirección contraria a la advertencia — no un 15-60 %
+más caro, sino ~0 %, dentro del ruido de medición.** Se implementa `word_timestamps=True` sin condición
+ni ajuste por perfil, tal como marcaba el criterio de cierre.
+
+**Tres verificaciones antes de dar la regla por buena** (§14) — **las tres CERRADAS el 2026-08-10, lote
+1.b**. Metodología: 5 fragmentos de voz real (SAPI inglés) unidos con silencios de duración EXACTA por
+recuento de muestras (3,5 / 6,0 / 1,0 / 4,3 s), sin pasar por ningún `ffmpeg`, con el ground truth de dónde
+empieza cada fragmento registrado por construcción — no medido.
+
+| # | Qué | Por qué importaba | Resultado medido |
+|---|---|---|---|
+| **V2** | Reconfirmar el hallazgo con **`vad_filter=True`**, que es nuestra configuración real | El experimento se hizo con `vad_filter=False`. Con VAD, el silencio se recorta antes de decodificar y los tiempos se remapean: **los huecos pueden reconstruirse de otra forma**. Si con VAD los huecos ya aparecen, `word_timestamps` podría no hacer falta | **No se reconstruyen.** Hueco `end`→`start` = **0,000 s en los 4 silencios**, igual que sin VAD. `word_timestamps` sigue haciendo falta |
+| **V3** | Medir el sobrecoste real de `word_timestamps=True`, mismo clip, con y sin | Si supera ~30 % en CPU, se expone como ajuste con valor por defecto **por perfil** (GPU sí, CPU a elección). **No se construye esa maquinaria hasta que el número la justifique** | **~0 %, dentro del ruido de medición** (2 rondas, clip real de 120-300 s, 4-2 corridas intercaladas por config: −5,5 % y −0,0 % de media). Muy por debajo de la horquilla +10-30 % [E]. **No se construye el ajuste por perfil** |
+| **V4** | Confirmar que el **`start`** del segmento posterior al silencio sí marca el inicio real del habla | Los `[mm:ss]` que se imprimen usan `start`. Si `start` también está corrido, **el problema no es el corte de párrafo: son las marcas de tiempo**, que es mucho más grave. Una línea de comprobación que decide si lo que publicamos es fiable | **Sí, dentro de ~30 ms** en las 4 posiciones probadas (start observado 7,650/19,140/25,880/36,860 s vs. ground truth 7,679/19,162/25,911/36,869 s). **Las marcas de tiempo del `.md` son fiables** |
+
+**Lo que NO se elige, y por qué:** cortar por número de segmentos sería arbitrario (un segmento son 2-10 s
+según lo que decida el decodificador) y **aceptar la limitación y documentarla** sería vender como
+"párrafos con marcas de tiempo" algo que no sigue al hablante. Esa opción no hizo falta reabrirla: V3 salió
+barato y V2 no ofreció una alternativa gratis, así que `word_timestamps=True` + `Segment.speech_end` es la
+solución implementada, sin condiciones pendientes.
 
 ### `.txt` — texto corrido
 
@@ -749,18 +839,30 @@ Marca de tiempo del **primer segmento del párrafo**. `[mm:ss]` si el medio dura
    >
    > **[ Descargar ]**
 
-   > 🚫 **En cuarentena (2026-08-10).** Aquí ponía `small — 464 MB` preseleccionado y **`medium` y
-   > `large-v3-turbo` "marcados por superar el techo"**. Ese marcado medía contra un techo de instalación
-   > **que nunca existió**. **ADR-0002 fija el catálogo, el preseleccionado y qué se marca.**
+   **Lo que rellena esos huecos lo calcula `recommend_profile()` según el hardware** (ADR-0002 §3). En una
+   máquina **sin GPU**, el preseleccionado es **`small` — 464 MB [M-dev]**, y el tiempo que hay que
+   escribir es **~8,7 min por cada 10 min de audio** (de 1,15× medido sobre audio real), **no 3,5**. En la
+   **1050 Ti** sería `large-v3-turbo` — 1,6 GB, ~1,4 min por cada 10.
+
+   **Obligatorio en esta pantalla, sin excepción** (ADR-0002 E3, obligación de transparencia): **los dos
+   números** —cuánto se descarga **y** cuánto ocupará en RAM o VRAM al ejecutarse—, la ruta de destino, el
+   disco libre, la frase de que se puede borrar, y el tiempo estimado **con su perfil de hardware**.
+
+   > **Regla de unidad, obligatoria en toda la interfaz y el README** (ADR-0002 §8.4): **el tiempo se
+   > expresa en "minutos de proceso por cada 10 minutos de audio", NUNCA como un multiplicador `×`.** El
+   > `speed_ratio` es un campo técnico del estado (§4.2) y **no aparece jamás en un texto para humanos**:
+   > ya se leyó del revés una vez (un `2,8×` se transmitió como "28 minutos" en lugar de 3,6), con un
+   > factor 8 de error. Una unidad que se puede leer al revés acabará leyéndose al revés.
    >
-   > **Lo que NO cambia y sigue siendo obligatorio en esta pantalla:** el tamaño exacto en MB, la ruta de
-   > destino, el disco libre, la frase de que se puede borrar, y el tiempo estimado por cada 10 minutos de
-   > audio — con la cifra que salga de V1, **nunca una redondeada a la baja**. La estimación anterior
-   > ("~2 min") **era falsa** y así se descubrió: no repetir el patrón.
-   >
-   > Y una línea nueva, si ADR-0002 aprueba la GPU: **qué dispositivo se va a usar** ("Aceleración GPU:
-   > activa (GTX 1050 Ti)" / "no instalada — [cómo activarla]"). Sin eso, el usuario que instaló el
-   > paquete de GPU no tiene forma de saber si le está sirviendo de algo.
+   > **Historial de cifras falsas en esta misma pantalla, para no repetirlo una tercera vez:** primero puso
+   > "~2 min" (estimación de memoria), luego "~3-4 min" (derivada de un clip **sintético** de 42,7 s). La
+   > buena es **~8,7 min** [M-dev, audio real, `vad_filter=True`]. **El audio sintético sirve para probar
+   > el mecanismo, no para medir rendimiento, y su sesgo es optimista en una sola dirección.**
+
+   Y una línea más, ahora que la GPU está aprobada: **qué dispositivo se va a usar**, con el estado
+   tri-estado de §3 — *"Aceleración GPU: disponible (se confirma en el primer trabajo)"* / *"activa
+   (GTX 1050 Ti, int8)"* / *"no instalada — [cómo activarla]"*. **Nunca se afirma que la GPU funciona antes
+   de que la prueba de humo lo confirme.**
 
 3. Al pulsar: fase `downloading_model` con progreso calculado **midiendo el tamaño de `models/` contra
    `expected_bytes`**, que funciona haya o no llamada de vuelta en la biblioteca de descarga (S4, abierto).
@@ -790,6 +892,9 @@ lado, sus claves pisan a las de por defecto. **El motor nunca lee ninguno de los
 | `cpu_threads` | `0` | 0 = decide CTranslate2. Ignorado en GPU |
 | `language` | `null` | `null` = detección automática; `"es"`/`"en"` la fuerzan |
 | `vad_filter` | `true` | recorte de silencios |
+| **`word_timestamps`** | `true` | rellena `Segment.speech_end`. **Es lo único que permite cortar párrafo por las pausas del hablante** (§7). Coste medido en V3: ~0 %, dentro del ruido |
+| **`paragraph_gap_seconds`** | `2.0` | hueco a partir del cual se abre párrafo. Se ajusta contra material real **sin tocar código**, misma filosofía que D26 |
+| **`min_viable_speed_ratio`** | `1.0` | suelo del filtro de viabilidad (ADR-0002 E2): nunca se **recomienda** algo más lento que el tiempo real. El usuario sí puede elegirlo a mano |
 | `max_input_bytes` | `2147483648` | tope de archivo/descarga (2 GiB) |
 | `output_formats` | `["txt","md"]` | qué se escribe |
 | `output_dir` | `null` | `null` = junto al origen |
@@ -863,6 +968,9 @@ serve-token.txt
 # Accesos directos generados por install.ps1 (rutas absolutas de cada maquina)
 *.lnk
 
+# Material de prueba generado (audio sintetico, .mp4 construidos con PyAV, salidas de referencia)
+test/
+
 __pycache__/
 ```
 
@@ -878,12 +986,14 @@ todas formas (tope de 100 MB por archivo).
 | Lote | Qué entra | Criterio de aceptación | Estado |
 |---|---|---|---|
 | **0** | *Spike* de supuestos en venv aislado | S1, S5, S6, S8 y peso resueltos | **HECHO** — `SPIKE-RESULTS.md` |
-| **1** | `errors.py` + `transcribe.py` + `export.py` + `cli.py` · **enmienda 2026-08-10: `DeviceCapabilities`, `DeviceChoice`, `probe_devices()` (CUDA apagado), `resolve_device()` (política ENTERA, es pura), `recommend_profile()`** | `py -3 cli.py audio.wav` produce `.txt` y `.md` correctos · `load_model` recibe un `DeviceChoice`, no un `compute_type` suelto · **la tabla de capacidades sintéticas de §14 pasa entera, incluida la fila de la RTX 3080** · **V1: medir 10 min en español y publicar el ratio como [M-dev]** (ya no elige modelo: **informa la estimación**) | **en curso** |
+| **1** | `errors.py` + `transcribe.py` + `export.py` + `cli.py` + contrato de dispositivo (`resolve_device()` entera, `probe_devices()` con CUDA apagado, `recommend_profile()`) | 9 casos de ejecución real · motor sin `webview` ni `http.server` (verificado con `grep` sobre disco) | **HECHO y commiteado** |
+| **1.b** | Cierre de los pendientes que dejó el lote 1 | **V2** (huecos con `vad_filter=True`) · **V3** (coste de `word_timestamps`) · **V4** (¿`start` marca el habla real?) · **V1** (10 min en español, bloqueada por falta de voz española) | **V2, V3, V4 HECHAS y `speech_end`/`word_timestamps` implementados (2026-08-10, ver §7)** · V1 **sigue bloqueada** por falta de voz SAPI española |
 | **2** | `models.py` + `jobs.py`: catálogo, descarga con progreso, cola FIFO, cancelación, cerrojo, purga, suelta del modelo | encolar tres trabajos y ver `queue_position` · cerrar S4, S12 y S13 | pendiente |
 | **3** | Cáscara ventana (`app.py`, `ui.html`, `messages.py`, `settings.py`) | doble clic abre · **`storage_path` propio (§6.1)** · cerrar S11 | pendiente |
 | **4** | `fetch.py`: enlaces, clasificación de errores, aviso de caducidad, `player_clients` de settings | un muxeado de YouTube **no** produce error · cerrar S7 con un enlace de X | pendiente |
 | **5** | `install.ps1`, `uninstall.ps1`, los dos `.cmd`, `icon.ico`, `README.md` + checklist de cierre | los tres niveles de prueba de la casa | pendiente |
 | **6** | `serve.py`: modo servidor, `/api/v1`, token, exclusividad | `curl` contra los nueve endpoints **y `git diff --stat` sin cambios en el motor** | pendiente |
+| **7** | **GPU (ADR-0002):** `install-gpu.ps1`, `uninstall-gpu.ps1`, `requirements-gpu.txt`, `add_cuda_dlls_to_path()`, imports perezosos, `smoke_test_cuda()`, catálogo con VRAM medida | el instalador **termina ejecutando la prueba de humo y dice el resultado** · desinstalar sin GPU no rompe nada · los tres códigos de fallo dan tres mensajes distintos | pendiente |
 
 **V1 es la verificación que puede cambiar el valor por defecto** (ADR-0001 D5): si 10 minutos de audio en
 español dan menos de 3× tiempo real, `base` pasa a ser el modelo por defecto, sin ADR nuevo.
@@ -919,11 +1029,19 @@ Los tres niveles obligatorios de la casa, más lo propio de esta herramienta.
    confirmó que el wheel de PyAV trae `libx264` y `aac` embebidos [M], así que se decodifica el `.wav` con
    `av.open(...)`, se generan fotogramas sintéticos y se muxa con `container.mux(...)`.
 
-> **Trampa medida, léela antes de escribir la prueba:** en la máquina del dueño **la única voz SAPI
-> instalada es "Microsoft David Desktop", en inglés** [M]. No hay voz en español. Para generar la entrada
-> en español hay que **instalar una voz española de Windows** (Configuración → Hora e idioma → Voz) o usar
-> un clip real. El spike tuvo que hacer sus pruebas en inglés por esto, y por eso **S11 (detección
-> automática de idioma) quedó abierto**.
+> **Voces SAPI disponibles (2026-08-10):** `Microsoft David Desktop` (inglés) y **`Microsoft Sabina
+> Desktop` (`es-MX`)**, instalada por el dueño y **verificada visible para `System.Speech.Synthesis` con
+> `GetInstalledVoices()`** — la comprobación importa: muchas voces de Windows se instalan solo para el
+> Narrador y SAPI no las ve. **V1 y S11 quedan desbloqueadas.** El dialecto `es-MX` no afecta a ninguna de
+> las dos: Whisper detecta `es` sin distinguir variante y el coste de proceso no depende del acento.
+>
+> **Lo que la voz sintética NO desbloquea: V6, la calidad de texto en español.** Una medición de calidad
+> sobre TTS es **optimista**: no hay acento marcado, ni ruido, ni solapamiento, ni micrófono mediocre, ni
+> muletillas — justo el material donde un modelo mayor se separa de uno menor. **V6 exige una grabación
+> humana real** con transcripción de referencia (ADR-0002 §10).
+>
+> El lote 1 hizo lo correcto **no aproximando V1 con audio en inglés**: una medición de velocidad en el
+> idioma equivocado no es conservadora, es un número que parece válido y no lo es.
 
 Casos que la entrada debe incluir: cifras, nombres propios, un silencio largo (alucinación) y un archivo
 deliberadamente truncado (para `decode_failed`).
@@ -953,8 +1071,11 @@ desarrollo:
 | cc 8.6 · **900 MB libres** (juego abierto) | `cpu`, `fell_back_from="cuda"`, motivo `insufficient_vram` |
 | cc 6.1 · 3200 MB · `["int8","float32"]` (perfil DEV real) | `cuda` + **`int8`** |
 | cc 6.1 · 3200 MB · modelo que pide 4 GB en fp16 | `cuda` + `int8` si cabe; si no, `cpu` |
-| `cuda_available=False`, motivo `cuda_libs_missing` | `cpu`, con aviso, **nunca un error** |
-| `cuda_available=False`, motivo `cuda_libs_mismatch` | `cpu`, con aviso **distinto**: la acción del usuario no es la misma |
+| `cuda_status="unavailable"`, motivo `cuda_libs_missing` | `cpu`, con aviso, **nunca un error** |
+| `cuda_status="unavailable"`, motivo `cuda_libs_mismatch` | `cpu`, con aviso **distinto**: la acción del usuario no es la misma |
+| cc 8.6 · 9500 MiB libres · `large-v3` fp16 (pico ~6100 MiB [E]) | `cuda` + `float16` — quedan ~3,4 GiB, pasa la holgura de 512 MiB |
+| cc 6.1 · 3546 MiB libres · `large-v3` int8 (pico **3951 MiB [M-dev]**) | `cpu` por `insufficient_vram` — **este caso se midió y reventó de verdad** |
+| cc 6.1 · 3546 MiB libres · `medium` float32 (pico ~3900 MiB [M-dev]) | `cpu` — es el caso de **degradación silenciosa**: la holgura de 512 MiB existe para excluirlo |
 | `preference="cpu"` con una 3080 presente | `cpu`, `fell_back_from=None` (lo pidió el usuario, no es caída) |
 
 **Lo que NO se puede simular, y hay que decirlo sin adornos:** la **ejecución** real en `float16` exige

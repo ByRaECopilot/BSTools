@@ -1,7 +1,7 @@
 ---
 title: "ADR-0001 — Voice2Text: núcleo de transcripción local reutilizable, con faster-whisper y sin ffmpeg del sistema"
 status: parcialmente-derogado
-superseded_by: "ADR-0002 (pendiente) — presupuesto de modelo, calidad y GPU opcional"
+superseded_by: "ADR-0002-voice2text-modelo-y-gpu.md — supersede D5, D20 y la regla de peso de §7"
 updated: 2026-08-10
 ---
 
@@ -641,7 +641,7 @@ contenido que cada uno transcriba.
 | **BSTools pasa a tener dos herramientas usando WebView2 en la misma máquina** | D25: cada una posee su propio `storage_path`. Es una interacción entre carpetas "autocontenidas" que la regla de oro no cubre y conviene recordar en la próxima herramienta que use WebView2 |
 | Recarga del modelo tras 5 min de inactividad (D22) | ~3-10 s [E] frente a ~1 GB de RAM recuperado; configurable y desactivable |
 | Whisper alucina texto repetido en silencios y música | `vad_filter=True` por defecto; límite conocido en el README |
-| Detección automática de idioma **sin probar** | S11 abierto; hay selector manual `es`/`en` |
+| Detección automática de idioma **sin probar** | S11 en ejecución desde el 2026-08-10; hay selector manual `es`/`en` |
 | Tres capas en vez de dos | Se paga una vez; el lote 6 comprueba que sirvieron |
 | `pip` global ensucia el Python del usuario | Patrón de la casa; `uninstall.ps1` documenta el `pip uninstall` exacto |
 
@@ -663,9 +663,12 @@ contenido que cada uno transcriba.
 | **S3** | Velocidad con **10 min de audio en español**, en el modelo y el dispositivo que decida ADR-0002 | **ABIERTO, reencuadrado** | El spike midió **2,8× sobre 42,7 s en inglés** con `small` en CPU [M]. 🚫 **Ya no dispara nada**: la cláusula condicional está suspendida. Sigue siendo la verificación **V1** del lote 1, pero ahora su función es **informar la estimación que ve el usuario**, no elegir el modelo |
 | **S4** | Progreso de descarga del modelo | **ABIERTO** | El modelo se descargó, pero no se probó cómo reportar su progreso. Plan B ya escrito: sondear el tamaño de `models/` |
 | **S7** | Un enlace de X con HLS produce algo que PyAV lee | **ABIERTO** | No se probó. Si falla → `decode_failed` y se documenta. **No se resuelve con ffmpeg** |
-| **S11** | Detección **automática** de idioma en español e inglés | **ABIERTO** | Todas las corridas forzaron el idioma. Además, **en la máquina del dueño no hay voz SAPI en español instalada** [M]: para generar la entrada de prueba en español hay que instalar una voz o usar un clip real |
+| **S11** | Detección **automática** de idioma en español e inglés | **DESBLOQUEADO (2026-08-10), en ejecución** | Las corridas del spike forzaron el idioma. El dueño instaló `Microsoft Sabina Desktop` (`es-MX`), **verificada visible para SAPI** con `GetInstalledVoices()`. Entrega en `VERIF-ESPANOL.md`. **La voz sintética vale para idioma y velocidad, NO para calidad de texto** (ADR-0002 §10) |
 | **S12** | El cerrojo exclusivo de archivo no deja fantasmas | **ABIERTO** | Se verifica en el lote 2 |
 | **S13** | Soltar el modelo libera la memoria nativa; coste de recarga | **ABIERTO** | Se verifica en el lote 2. Si no libera, **D22 se retira** y el modelo se queda cargado mientras viva el proceso |
+| **V2** | Los huecos entre segmentos con **`vad_filter=True`** (nuestra configuración real) | **CERRADO [M], 2026-08-10** | **No se reconstruyen solos.** Con 4 silencios construidos por muestra exacta (3,5/6,0/1,0/4,3 s), el hueco medido entre `end` y el `start` siguiente fue **0,000 s en los cuatro casos**, igual que con `vad_filter=False`. El VAD remapea los tiempos al medio original, pero **no libera el `end` de su estiramiento** hasta el `start` siguiente. `word_timestamps` **sigue haciendo falta** |
+| **V3** | Sobrecoste de `word_timestamps=True`, mismo clip con y sin | **CERRADO [M], 2026-08-10** | **Muy por debajo de lo esperado: dentro del ruido de medición, ~0 %.** Ronda 1 (clip real 300 s, 2 corridas por config): −5,5 %. Ronda 2 (clip real 120 s, 4 corridas por config, intercaladas): False 81,22 s vs True 81,21 s de media → **−0,0 %**. La horquilla de +10-30 % [E] **no se cumplió, en sentido favorable** — contradice la propia advertencia de calibración de Kronos (que apuntaba a que sus estimaciones salen optimistas, no pesimistas). No se activa la cláusula de ajuste por perfil |
+| **V4** | ¿El **`start`** del segmento posterior a un silencio marca el inicio real del habla? | **CERRADO [M], 2026-08-10** | **Sí, dentro de ~30 ms**, en las cuatro posiciones de silencio probadas (después de 3,5/6,0/1,0/4,3 s): `start` observado 7,650/19,140/25,880/36,860 s vs. ground truth por construcción 7,679/19,162/25,911/36,869 s. Las marcas de tiempo del `.md` **son fiables**: el riesgo grave que abría esta verificación no se materializó |
 
 **Ningún hallazgo bloquea la construcción.** Lo único con consecuencia sobre una decisión es S3, y su
 consecuencia ya está escrita y pre-autorizada en D5.
@@ -760,23 +763,86 @@ puerta a `float16` justo en la máquina buena**, además de ser menos canónico.
 `models/` sirve para CPU, para DEV y para PROD, porque **la cuantización ocurre al cargar**. Coste
 aceptado: la descarga es mayor (`turbo` 1,6 GB en vez de ~0,9 GB), y eso alimenta la pregunta de §17.4.
 
-### 17.4 Pregunta abierta del dueño — dos ramas, sin resolver aquí
+### 17.4 CERRADO por el dueño: rama B, y el techo muere del todo
 
-*¿El techo de ~1 GB de modelo sigue aplicando en la máquina con 10 GB de VRAM, o allí se usa lo mejor que
-quepa?* Devuelta al dueño. Las dos ramas, escritas para que su respuesta sea de una línea:
+**Respuesta recibida el 2026-08-10. No quedan preguntas de dirección abiertas.**
 
-- **Rama A — techo uniforme.** El presupuesto de modelo gobierna los tres perfiles. Como §17.3 fija fp16
-  canónico, "1 GB y un poco más" hay que interpretarlo: si se lee como **~1,6 GB**, entran `medium`
-  (1,53 GB) y `turbo` (1,6 GB) en todas partes y **`large-v3` (3,1 GB) queda fuera incluso en la 3080**;
-  si se lee **estricto en 1 GB**, con fp16 canónico el techo solo lo pasa `small` (464 MB) y la decisión
-  se vuelve trivial y mala.
-- **Rama B — el techo gobierna solo lo que no tiene GPU.** En instalaciones sin GPU manda el presupuesto;
-  con GPU se usa **lo mejor que quepa en VRAM**, que en PROD es `large-v3` en fp16. Es la rama coherente
-  con "la prioridad es la calidad".
+1. **Rama B — "lo mejor que quepa por máquina".** `large-v3` completo (~3,1 GB en fp16) en la RTX 3080; el
+   mejor viable en la 1050 Ti; el mejor viable sin GPU. **El catálogo recomendado se calcula por perfil de
+   hardware: no hay un ganador único.**
+2. **El techo de ~1 GB era ORIENTATIVO, no un límite** — ni de descarga ni de memoria. Literal del dueño:
+   *"Ninguno, era orientativo"*. **Muere como restricción de diseño en todas partes**, igual que murió
+   D20, y con él mueren los campos que lo representaban en el código (`over_model_budget`,
+   `model_budget_bytes`: ver `ARCHITECTURE.md` §3). **Dejar un parámetro que ya nadie hace cumplir es
+   peor que quitarlo: invita a que alguien lo vuelva a aplicar.**
+3. **Criterio de desempate definitivo y único: CALIDAD DE TEXTO.** Velocidad después. Peso, al final.
 
-**Sub-pregunta que va con la respuesta, porque cambia el número:** ¿el techo se mide sobre el **tamaño de
-descarga** (lo que ocupa `models/`, que es lo que el dueño ve) o sobre el **uso en memoria**? Este ADR lo
-ha leído siempre como tamaño de descarga.
+**Lo que ocupa el lugar del techo: la obligación de transparencia.** El usuario tiene que saber, **antes
+de que ocurra y siempre**, **dos** números y no uno: **cuánto se va a descargar** y **cuánto va a ocupar
+al ejecutarse** (RAM o VRAM). Antes bastaba con el primero porque el segundo era pequeño; con `large-v3`
+son ~3,1 GB de descarga y ~4 GB de VRAM [E], y callar el segundo sería engañar por omisión.
+
+#### El filtro de viabilidad, que "calidad primero" necesita para no ser una trampa
+
+**Aplicar "calidad primero, velocidad después" como un orden puramente lexicográfico recomendaría
+`large-v3` en un portátil sin GPU**, donde 10 minutos de audio tardarían del orden de **30-50 minutos**
+[E, extrapolado del único punto medido]. Eso no es una recomendación: es una emboscada, y encima en un
+repositorio público que descargará gente con hardware que no conocemos.
+
+Por eso `recommend_profile()` hace **dos pasos, en este orden**:
+
+1. **Filtro de viabilidad** — un candidato entra solo si (a) cabe en la VRAM libre con margen, en caso de
+   GPU; y (b) su `speed_ratio` estimado supera un suelo configurable, `min_viable_speed_ratio`, **1,0 por
+   defecto**: nunca se *recomienda* algo más lento que el tiempo real.
+2. **Orden por calidad** entre los que pasaron, y solo a igualdad de calidad, por velocidad; y a igualdad
+   de ambas, por peso.
+
+**El filtro solo gobierna la recomendación, no la libertad del usuario:** quien quiera `large-v3` en su
+CPU y esperar 45 minutos puede elegirlo a mano, viendo la estimación. Lo que no puede pasar es que se lo
+encuentre preseleccionado sin haberlo pedido.
+
+#### Por qué `recommend_profile()` y `resolve_device()` siguen siendo dos funciones — y no se toca
+
+Esta decisión **refuerza** la separación, y se deja escrito aquí para que nadie la "simplifique" dentro de
+seis meses:
+
+> Con modelos de **3,1 GB** sobre la mesa, si `resolve_device()` pudiera resolver también el modelo,
+> **encolar una transcripción podría disparar una descarga de 3 GB que el usuario nunca aceptó.** El
+> modelo es una decisión de **descarga**, del usuario, una vez y con consentimiento explícito (D4). El
+> dispositivo y el `compute_type` son una decisión de **ejecución**, automática, por trabajo y sin
+> consecuencias en disco. **Fusionarlas es el desastre, no la simplificación.**
+
+#### La consecuencia incómoda: la misma herramienta da textos distintos
+
+Con un modelo por perfil, **el mismo audio produce texto distinto según la máquina donde corra** — y
+también según el `compute_type`, porque `int8` y `float16` no calculan igual. Para el dueño es aceptable y
+está aceptado. Para un repositorio **público CC0** hay que **declararlo en el README**, no descubrirlo:
+
+- La herramienta **no garantiza salida reproducible entre máquinas**. Depende del modelo, del dispositivo
+  y de la precisión, y las tres se eligen solas según el hardware.
+- Por eso **cada `.md` lleva en su cabecera con qué se hizo** (`Modelo: large-v3 (float16, GPU)`): es el
+  rastro que explica una diferencia sin tener que depurar nada.
+- Y por eso **ninguna prueba compara salidas por igualdad exacta**, sino con tolerancia
+  (`ARCHITECTURE.md` §14).
+- **Ninguna cifra de velocidad, ni en el README ni en la pantalla**, puede aparecer sin decir en qué
+  hardware se midió: `[M-dev]` / `[M-prod]`, o "sin medir".
+
+#### Y el número que nadie ha dicho todavía: la instalación de PROD ronda los 5-6 GB
+
+Es la consecuencia aritmética directa de la rama B, y la obligación de transparencia empieza por decirla
+aquí: ~309 MB de wheels [M-dev] + **3,1 GB** de `large-v3` + **1,5-2,5 GB** de librerías CUDA [E] =
+**~5-6 GB**. Frente a los ~795 MB [M-dev] de la configuración por defecto en CPU.
+
+Eso choca de frente con *"nada de dependencias de gigabytes"* de la constitución, y hay que resolverlo
+con una regla explícita, no mirando a otro lado:
+
+> **La instalación por defecto —CPU, sin GPU, modelo modesto— se mantiene en el orden de los ~800 MB. La
+> configuración de 5-6 GB es un camino OPCIONAL que el usuario construye a propósito**, instalando el
+> paquete de GPU y eligiendo un modelo mayor, **con los dos números delante en cada paso**. La regla de la
+> constitución protege a quien clona el repositorio, y a ese no se le impone nada.
+
+ADR-0002 debe confirmar esta lectura al fijar el catálogo: **el modelo por defecto de una instalación
+recién clonada sin GPU no puede ser `large-v3`**.
 
 ### 17.5 Lo que ADR-0002 tiene que resolver además
 

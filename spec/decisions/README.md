@@ -17,4 +17,4 @@ repositorio padre y **no están en esta carpeta**. No los busques aquí y no res
 | ADR | Decisión | Estado |
 |---|---|---|
 | [ADR-0001-voice2text-stack.md](ADR-0001-voice2text-stack.md) | Voice2Text: transcripción local con faster-whisper, PyAV sin ffmpeg del sistema, modelos fuera del repo, ventana propia y modo servidor manual | parcialmente-derogado |
-| ADR-0002 *(pendiente)* | Voice2Text: presupuesto de modelo, calidad como prioridad y GPU opcional — supersede D5, D20 y la regla de peso de ADR-0001 §7 | — |
+| [ADR-0002-voice2text-modelo-y-gpu.md](ADR-0002-voice2text-modelo-y-gpu.md) | Voice2Text: catálogo de modelos por perfil de hardware y GPU como complemento opcional — supersede D5, D20 y la regla de peso de ADR-0001 §7 | listo-para-construir |
