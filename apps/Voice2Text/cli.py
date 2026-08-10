@@ -13,6 +13,13 @@ no reventar con `UnicodeEncodeError` al imprimirlo.
 Uso:
     py -3 cli.py "C:\\ruta\\audio.wav"
     py -3 cli.py "C:\\ruta\\video.mp4" --language es --model-id base
+    py -3 cli.py --self-check                    (lote 7 / ADR-0002 Sec.6 y 14)
+
+`--self-check` no transcribe nada del usuario: imprime las `DeviceCapabilities`
+reales, la `DeviceChoice` que resuelve `resolve_device()` y ejecuta la prueba de
+humo real de GPU (fusionada con la primera carga en `load_model`, ADR-0002 E8).
+Es el comando que ejecuta `install-gpu.ps1` al terminar de instalar, y el que hay
+que correr tal cual en la RTX 3080 quien migre (ARCHITECTURE.md Sec.14).
 """
 from __future__ import annotations
 
@@ -35,7 +42,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Transcribe un archivo local con faster-whisper (lote 1, sin cascara).",
     )
-    parser.add_argument("media_path", type=Path, help="ruta al archivo de audio o video")
+    parser.add_argument(
+        "media_path", type=Path, nargs="?", default=None,
+        help="ruta al archivo de audio o video. Omitir junto con --self-check",
+    )
+    parser.add_argument(
+        "--self-check", action="store_true",
+        help="no transcribe nada: prueba de humo de GPU (ADR-0002 Sec.6/14). Ver cabecera del archivo",
+    )
     parser.add_argument("--model-id", default="small", help="small (por defecto) o base")
     parser.add_argument("--language", default=None, help="es | en (vacio = deteccion automatica)")
     parser.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR)
@@ -68,6 +82,64 @@ def _print_error(err: CoreError) -> None:
     _print(f"ERROR [{err.code.value}] detalles={err.details} tecnico={err.technical}")
 
 
+def _self_check(args: argparse.Namespace) -> int:
+    """Prueba de humo de GPU, sin transcribir nada del usuario (ADR-0002 Sec.6/14).
+
+    Codigo de salida: 0 = GPU confirmada funcionando. 1 = GPU no confirmada (se
+    quedo en CPU) o fallo al cargar el modelo. NUNCA levanta una excepcion sin
+    capturar: es lo que llama `install-gpu.ps1` para decidir que mensaje mostrar.
+    """
+    _print("Voice2Text - autochequeo de GPU (ADR-0002 Sec.6 / ARCHITECTURE.md Sec.14)")
+    _print("")
+
+    caps = transcribe.probe_devices()
+    _print(f"  cuda_status: {caps.cuda_status}")
+    _print(f"  gpu: {caps.gpu_name or '(ninguna detectada)'}")
+    if caps.compute_capability:
+        _print(f"  compute capability: {caps.compute_capability[0]}.{caps.compute_capability[1]}")
+    if caps.vram_total_mb is not None and caps.vram_free_mb is not None:
+        _print(f"  VRAM libre: {caps.vram_free_mb} MiB de {caps.vram_total_mb} MiB")
+    _print(f"  compute types soportados: {caps.supported_compute_types}")
+    if caps.unavailable_reason:
+        _print(f"  motivo: {caps.unavailable_reason}")
+    _print("")
+
+    if caps.cuda_status == "unavailable":
+        _print(f"RESULTADO: sin GPU utilizable ({caps.unavailable_reason}). Se sigue usando CPU.")
+        return 1
+
+    device_choice = transcribe.resolve_device(args.model_id, caps, preference="cuda")
+    _print(f"  resolve_device(model_id={args.model_id!r}): device={device_choice.device} compute_type={device_choice.compute_type}")
+    if device_choice.device != "cuda":
+        _print("")
+        _print(
+            f"RESULTADO: hay GPU visible pero no cabe el modelo '{args.model_id}' con la "
+            f"holgura de VRAM exigida (motivo: {device_choice.fallback_reason}). Se usa CPU."
+        )
+        return 1
+
+    _print(f"  cargando '{args.model_id}' y ejecutando la prueba de humo real (no solo construir)...")
+    try:
+        model = transcribe.load_model(
+            args.model_id, args.models_dir, device_choice, allow_download=not args.no_download,
+        )
+    except CoreError as err:
+        _print_error(err)
+        _print("")
+        _print("RESULTADO: fallo al cargar el modelo. No se pudo probar la GPU.")
+        return 1
+
+    used = getattr(model, transcribe._ATTR_DEVICE_CHOICE, None)
+    _print("")
+    if used is not None and used.device == "cuda":
+        _print(f"RESULTADO: GPU CONFIRMADA ({caps.gpu_name}, compute_type={used.compute_type}).")
+        return 0
+
+    reason = used.fallback_reason if used is not None else "desconocido"
+    _print(f"RESULTADO: GPU NO confirmada tras la prueba de humo real (motivo: {reason}). Se uso CPU.")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     # UTF-8 explicito: el texto transcrito puede llevar acentos aunque nuestra
     # prosa fija de consola no los use.
@@ -77,6 +149,13 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+
+    if args.self_check:
+        return _self_check(args)
+
+    if args.media_path is None:
+        _print("ERROR: falta la ruta del archivo (o usa --self-check).")
+        return 2
 
     media_path = args.media_path.resolve()
     output_dir = (args.output_dir or media_path.parent).resolve()

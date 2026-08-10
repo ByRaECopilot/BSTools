@@ -4,21 +4,35 @@ Puro, tal como exige ADR-0001 D11 / ARCHITECTURE.md Sec.2: sin estado global, si
 configuracion, sin `print`, sin `sys.exit`, sin una sola palabra en castellano. No
 importa `webview`, `http.server` ni `settings`. Quien lo llama pasa todo por argumento.
 
-Incluye la enmienda de resolucion de dispositivo del 2026-08-10 (ARCHITECTURE.md Sec.3,
-obligatoria en el lote 1): el contrato completo se escribe aqui -- `DeviceCapabilities`,
-`DeviceChoice`, `probe_devices()`, `resolve_device()` -- pero SOLO se implementa la rama
-CPU. La rama CUDA la rellena ADR-0002 sin tener que reabrir estas firmas.
+Lote 7 (ADR-0002): rellena la rama CUDA que el lote 1 dejo apagada a proposito.
+Tres reglas que gobiernan este archivo y no son negociables:
+
+1. **`faster_whisper` y `ctranslate2` se importan de forma PEREZOSA**, dentro de las
+   funciones que los usan, nunca al nivel de modulo (ADR-0002 E7, mismo patron que el
+   import perezoso de `yt_dlp`, ADR-0001 D7). `add_cuda_dlls_to_path()` tiene que
+   correr ANTES de cualquiera de los dos imports: pip deja las DLL de CUDA en
+   `site-packages/nvidia/*/bin` sin publicarlas en el PATH, y el sintoma de no
+   hacerlo es IDENTICO al de no tener las librerias instaladas.
+2. **Ninguna construccion de `WhisperModel(device="cuda")` prueba por si sola que la
+   GPU funciona** (ADR-0002 E8, medido: carga sin error con las DLL ausentes; el
+   `RuntimeError` solo llega en la primera `transcribe()`). La unica comprobacion
+   fiable es `smoke_test_cuda()`, fusionada con la primera carga real en
+   `load_model()`.
+3. **La holgura de VRAM es 512 MiB ABSOLUTOS, nunca un porcentaje** (ADR-0002 Sec.7):
+   quedarse justo por debajo del limite es peor que pasarse -- pasarse da un
+   `CUDA out of memory` capturable, quedarse al borde no da nada que capturar.
 """
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
 import av
-from faster_whisper import WhisperModel
 
 from errors import CoreError, ErrorCode, one_line
 
@@ -42,8 +56,14 @@ class Segment:
 
 @dataclass(frozen=True)
 class DeviceCapabilities:
-    """Lo que HAY en la maquina. Barato, sin cargar modelo."""
-    cuda_available: bool
+    """Lo que HAY en la maquina. Barato, sin cargar modelo.
+
+    `cuda_status` es tri-estado (ADR-0002 E9), NUNCA un bool: "se construyo el
+    modelo" no prueba que la GPU funcione (medido, ver `smoke_test_cuda`).
+    `probe_devices()` solo puede devolver "unavailable" o "probable" -- "confirmed"
+    exige la prueba de humo real, que ocurre en la primera carga (`load_model`).
+    """
+    cuda_status: str                                  # "unavailable" | "probable" | "confirmed"
     cuda_device_count: int
     gpu_name: Optional[str]                          # "NVIDIA GeForce GTX 1050 Ti"
     compute_capability: Optional[tuple[int, int]]     # (6, 1) en Pascal
@@ -51,7 +71,9 @@ class DeviceCapabilities:
     vram_free_mb: Optional[int]
     supported_compute_types: list[str]                # p.ej. ["int8", "float32"]
     unavailable_reason: Optional[str]                 # codigo estable, nunca texto:
-    # "no_nvidia_gpu" | "cuda_libs_missing" | "cuda_libs_mismatch" | "compute_capability_too_low"
+    # "no_nvidia_gpu" | "cuda_libs_missing" | "cuda_libs_not_on_path"
+    # | "cuda_libs_mismatch" | "compute_capability_too_low" | "insufficient_vram"
+    # | "smoke_test_failed"
 
 
 @dataclass(frozen=True)
@@ -78,68 +100,343 @@ class TranscriptionResult:
 _CPU_COMPUTE_TYPE = "int8"
 _ATTR_DEVICE_CHOICE = "_v2t_device_choice"
 
+# Orden de preferencia de compute_type (ARCHITECTURE.md Sec.3, politica 2): calidad
+# primero, se cuantiza solo lo que el hardware obligue. Se filtra siempre contra
+# `DeviceCapabilities.supported_compute_types`, que sale de CTranslate2, nunca de
+# una tabla escrita por nosotros (E11: en Pascal no incluye float16 y es un
+# ValueError limpio si se fuerza; en Ampere se espera que si lo incluya).
+_GPU_COMPUTE_ORDER = ("float16", "int8_float16", "int8", "float32")
+_CPU_COMPUTE_ORDER = (_CPU_COMPUTE_TYPE, "float32")
 
-def probe_devices() -> DeviceCapabilities:
-    """Lo que hay en la maquina, sin cargar ningun modelo.
+_VRAM_SLACK_MB = 512  # holgura ABSOLUTA (ADR-0002 Sec.7), nunca un porcentaje
 
-    Lote 1: SOLO CPU. No importa nada de CUDA de forma ansiosa -- mismo cortafuegos
-    de import perezoso que exige ADR-0001 D7 para yt-dlp, aplicado a la segunda
-    dependencia opcional. La deteccion real (bibliotecas CUDA, VRAM libre, compute
-    capability) es la rama que ADR-0002 debe decidir antes de activarse.
+# Subcarpetas de site-packages/nvidia/ que pip crea al instalar requirements-gpu.txt.
+# Deben coincidir con los paquetes fijados ahi (ADR-0002 E6): cublas, cudnn y la
+# transitiva cuda_nvrtc que pip trae sin que nadie la pida.
+_CUDA_DLL_SUBDIRS = ("cublas", "cudnn", "cuda_nvrtc")
+
+# Catalogo PROVISIONAL de picos de VRAM medidos [M-dev] (ADR-0002 Sec.3,
+# SPIKE-GPU-RESULTS.md Sec.4). VIVE AQUI, no en models.py, porque el lote 2
+# (models.py / ModelSpec / CATALOG completo) todavia no existe -- ARCHITECTURE.md
+# Sec.13 lo marca "pendiente". Es deuda declarada, a propósito: cuando el lote 2
+# aterrice, esta tabla debe fundirse en `ModelSpec.vram_peak_mb` y desaparecer de
+# aqui para no tener dos fuentes de verdad. Los huecos (p.ej. "small"/float16, o
+# cualquier cosa en la RTX 3080) son deliberados: sin medicion real, resolve_device()
+# descarta el candidato en vez de asumir que cabe (ver `_gpu_vram_peak_mb`).
+_GPU_VRAM_PEAK_MB: dict[str, dict[str, int]] = {
+    "small": {"int8": 1314, "float32": 2032},
+    # "medium"/float32 quedo NO CONCLUYENTE (degradacion silenciosa sin excepcion,
+    # SPIKE-GPU-RESULTS.md Sec.4): se omite a proposito, nunca se asume que cabe.
+    "medium": {"int8": 2416},
+    "large-v3-turbo": {"int8": 1575},
+    # large-v3/int8 remato en CUDA out of memory a 3951 MiB: se deja en la tabla
+    # para que la holgura de VRAM lo siga descartando en tarjetas pequenas.
+    "large-v3": {"int8": 3951},
+}
+
+
+def add_cuda_dlls_to_path() -> list[Path]:
+    """Antepone al PATH del proceso las carpetas `bin/` de las DLL de CUDA que pip
+    deja sueltas en `site-packages/nvidia/*/bin` (ADR-0002 E7).
+
+    OBLIGATORIO llamarla antes de importar `ctranslate2` o `faster_whisper`: sin
+    este paso el sintoma es IDENTICO a no tener las librerias instaladas, con pip
+    diciendo que la instalacion fue exitosa [M-dev, SPIKE-GPU-RESULTS.md Sec.5].
+
+    Devuelve las carpetas `bin/` que existian en disco y se antepusieron. Lista
+    vacia si el complemento de GPU no esta instalado -- caso mayoritario, no un
+    error.
     """
+    added: list[Path] = []
+    try:
+        import nvidia  # paquete namespace que agrupa cublas/cudnn/cuda_nvrtc
+    except ImportError:
+        return added
+
+    search_locations = getattr(nvidia, "__path__", None)
+    if not search_locations:
+        return added
+    nvidia_root = Path(list(search_locations)[0])
+
+    for sub in _CUDA_DLL_SUBDIRS:
+        bin_dir = nvidia_root / sub / "bin"
+        if bin_dir.is_dir():
+            added.append(bin_dir)
+
+    if not added:
+        return added
+
+    current = os.environ.get("PATH", "")
+    prefix = os.pathsep.join(str(p) for p in added)
+    os.environ["PATH"] = prefix + os.pathsep + current
+    return added
+
+
+def _query_gpu_info() -> tuple[
+    Optional[str], Optional[tuple[int, int]], Optional[int], Optional[int]
+]:
+    """Nombre, compute capability y VRAM AHORA MISMO via `nvidia-smi`.
+
+    `vram_free_mb` se lee en el momento, nunca se calcula restando de la capacidad
+    nominal: el escritorio de Windows ya ocupa ~460 MiB en reposo [M-dev,
+    SPIKE-GPU-RESULTS.md Sec.4]. Comprobacion barata: un solo proceso corto, sin
+    tocar CUDA. Si `nvidia-smi` no esta (no hay driver NVIDIA), se degrada a
+    "no se sabe", nunca a una excepcion que tumbe `probe_devices()`.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,compute_cap,memory.total,memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, None, None, None
+
+    first_line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+    parts = [p.strip() for p in first_line.split(",")]
+    if len(parts) != 4:
+        return None, None, None, None
+
+    name, cap_text, total_text, free_text = parts
+    compute_capability: Optional[tuple[int, int]] = None
+    if "." in cap_text:
+        major_text, _, minor_text = cap_text.partition(".")
+        if major_text.isdigit() and minor_text.isdigit():
+            compute_capability = (int(major_text), int(minor_text))
+
+    try:
+        vram_total_mb: Optional[int] = int(float(total_text))
+        vram_free_mb: Optional[int] = int(float(free_text))
+    except ValueError:
+        vram_total_mb = vram_free_mb = None
+
+    return (name or None), compute_capability, vram_total_mb, vram_free_mb
+
+
+def _unavailable(reason: str) -> DeviceCapabilities:
     return DeviceCapabilities(
-        cuda_available=False,
+        cuda_status="unavailable",
         cuda_device_count=0,
         gpu_name=None,
         compute_capability=None,
         vram_total_mb=None,
         vram_free_mb=None,
         supported_compute_types=[_CPU_COMPUTE_TYPE, "float32"],
-        unavailable_reason="cuda_libs_missing",
+        unavailable_reason=reason,
     )
 
 
-def resolve_device(model_id: str, caps: DeviceCapabilities, preference: str = "auto") -> DeviceChoice:
-    """Unica politica de eleccion de dispositivo (ARCHITECTURE.md Sec.3).
+def probe_devices() -> DeviceCapabilities:
+    """Lo que hay en la maquina, SIN cargar ningun modelo. Comprobaciones baratas:
+
+      1. Que las carpetas `bin/` de CUDA existan en disco y tengan DLL de verdad
+         (tapa el caso "instalado pero no en el PATH", que da el mismo error que
+         "no instalado" -- ADR-0002 Sec.6, no estaba en la recomendacion del spike
+         y se anade a proposito porque es gratis).
+      2. `ctranslate2.get_cuda_device_count() > 0`.
+      3. `ctranslate2.get_supported_compute_types('cuda', 0)` -- se PREGUNTA a la
+         libreria, jamas una tabla de compute capability escrita por nosotros (E11).
+
+    Devuelve como mucho "probable", NUNCA "confirmed": la unica confirmacion real
+    es la prueba de humo de `smoke_test_cuda()`, fusionada con la primera carga.
+    """
+    dll_dirs = add_cuda_dlls_to_path()
+    if not dll_dirs:
+        return _unavailable("cuda_libs_missing")
+
+    if any(not any(bin_dir.glob("*.dll")) for bin_dir in dll_dirs):
+        # Las carpetas existen (el paquete de pip esta) pero estan vacias: instalacion
+        # a medias, no "no instalado". Se distingue porque la accion es distinta.
+        return _unavailable("cuda_libs_not_on_path")
+
+    try:
+        import ctranslate2
+    except (ImportError, OSError) as exc:
+        logger.warning("ctranslate2 no cargo con el PATH de CUDA puesto: %s", one_line(str(exc)))
+        return _unavailable("cuda_libs_mismatch")
+
+    try:
+        device_count = ctranslate2.get_cuda_device_count()
+    except Exception as exc:  # ctranslate2 no documenta una jerarquia propia aqui
+        logger.warning("get_cuda_device_count() fallo: %s", one_line(str(exc)))
+        return _unavailable("cuda_libs_mismatch")
+
+    if device_count <= 0:
+        return _unavailable("no_nvidia_gpu")
+
+    try:
+        supported = list(ctranslate2.get_supported_compute_types("cuda", 0))
+    except Exception as exc:
+        logger.warning("get_supported_compute_types() fallo: %s", one_line(str(exc)))
+        return _unavailable("cuda_libs_mismatch")
+
+    if not supported:
+        return _unavailable("compute_capability_too_low")
+
+    gpu_name, compute_capability, vram_total_mb, vram_free_mb = _query_gpu_info()
+
+    return DeviceCapabilities(
+        cuda_status="probable",
+        cuda_device_count=device_count,
+        gpu_name=gpu_name,
+        compute_capability=compute_capability,
+        vram_total_mb=vram_total_mb,
+        vram_free_mb=vram_free_mb,
+        supported_compute_types=supported,
+        unavailable_reason=None,
+    )
+
+
+def _gpu_vram_peak_mb(model_id: str, compute_type: str) -> Optional[int]:
+    """Pico de VRAM medido para (modelo, compute_type), o None si no hay medicion.
+
+    Sin medicion, `resolve_device()` DESCARTA el candidato -- nunca asume que cabe
+    (ADR-0002 Sec.7: quedarse al borde es peor que un OOM limpio).
+    """
+    return _GPU_VRAM_PEAK_MB.get(model_id, {}).get(compute_type)
+
+
+def _pick_gpu_compute_type(
+    model_id: str, caps: DeviceCapabilities, override: Optional[str]
+) -> Optional[str]:
+    """Primer compute_type que (a) soporta esta GPU y (b) deja >= 512 MiB libres."""
+    candidates = [override] if override else list(_GPU_COMPUTE_ORDER)
+
+    for compute_type in candidates:
+        if compute_type not in caps.supported_compute_types:
+            continue
+        if caps.vram_free_mb is None:
+            continue
+        peak = _gpu_vram_peak_mb(model_id, compute_type)
+        if peak is None:
+            continue
+        if caps.vram_free_mb - peak >= _VRAM_SLACK_MB:
+            return compute_type
+
+    return None
+
+
+def resolve_device(
+    model_id: str,
+    caps: DeviceCapabilities,
+    preference: str = "auto",
+    compute_type_override: Optional[str] = None,
+) -> DeviceChoice:
+    """Unica politica de eleccion de dispositivo (ARCHITECTURE.md Sec.3, ADR-0002).
 
     Vive aqui y en ningun otro sitio: la cascara solo puede pasar una preferencia
-    (`"auto" | "cuda" | "cpu"`), nunca un dispositivo concreto. Lote 1: solo existe
-    la rama CPU. Cuando ADR-0002 apruebe la GPU, esta funcion -y solo esta funcion-
-    gana la rama CUDA (comprobando `caps` y `ModelSpec.min_vram_mb`); nada mas cambia.
+    (`"auto" | "cuda" | "cpu"`), nunca un dispositivo concreto. FUNCION PURA: no
+    toca hardware, solo decide a partir de `caps` -- por eso se puede probar la
+    politica de una RTX 3080 desde una GTX 1050 Ti con capacidades sinteticas
+    (ARCHITECTURE.md Sec.14).
     """
-    del model_id  # la rama CUDA lo usara para consultar ModelSpec.min_vram_mb (ADR-0002)
+    if preference == "cpu":
+        return DeviceChoice(
+            device="cpu",
+            device_index=0,
+            compute_type=compute_type_override or _CPU_COMPUTE_TYPE,
+            cpu_threads=0,
+            fell_back_from=None,
+            fallback_reason=None,
+        )
 
-    wanted_gpu = preference in ("auto", "cuda")
-    fell_back_from = "cuda" if (wanted_gpu and not caps.cuda_available) else None
+    wants_gpu = preference in ("auto", "cuda")
+
+    if wants_gpu and caps.cuda_status != "unavailable":
+        chosen = _pick_gpu_compute_type(model_id, caps, compute_type_override)
+        if chosen is not None:
+            return DeviceChoice(
+                device="cuda",
+                device_index=0,
+                compute_type=chosen,
+                cpu_threads=0,
+                fell_back_from=None,
+                fallback_reason=None,
+            )
+        # Ningun compute_type soportado deja la holgura de VRAM exigida: CPU, y se
+        # dice por que (nunca una caida muda -- ARCHITECTURE.md Sec.3).
+        return DeviceChoice(
+            device="cpu",
+            device_index=0,
+            compute_type=compute_type_override or _CPU_COMPUTE_TYPE,
+            cpu_threads=0,
+            fell_back_from="cuda",
+            fallback_reason="insufficient_vram",
+        )
+
+    fell_back_from = "cuda" if (wants_gpu and caps.cuda_status == "unavailable") else None
     fallback_reason = caps.unavailable_reason if fell_back_from else None
 
     return DeviceChoice(
         device="cpu",
         device_index=0,
-        compute_type=_CPU_COMPUTE_TYPE,
+        compute_type=compute_type_override or _CPU_COMPUTE_TYPE,
         cpu_threads=0,
         fell_back_from=fell_back_from,
         fallback_reason=fallback_reason,
     )
 
 
-def load_model(
-    model_id: str,
-    models_dir: Path,
-    choice: DeviceChoice,
-    allow_download: bool = False,
-) -> object:
-    """Carga (y si hace falta y se permite, descarga) un modelo faster-whisper.
+def smoke_test_cuda(model: object) -> tuple[bool, Optional[str]]:
+    """LA UNICA comprobacion fiable de que la GPU funciona de verdad (ADR-0002 E8).
 
-    Devuelve un MANEJADOR. No lo cachea en ninguna variable global: quien lo guarda
-    y quien lo suelta es `jobs.py` (ADR-0001 D22, lote 2). Con `allow_download=False`
-    y el modelo ausente, produce `CoreError(MODEL_MISSING)`.
+    `model` debe haberse construido con `device="cuda"`. Ejercita la ruta de
+    verdad: una inferencia real sobre medio segundo de audio sintetico generado EN
+    MEMORIA (silencio; nunca toca disco). En el camino feliz cuesta ~0,1 s porque
+    el modelo ya estaba cargado (ADR-0002 Sec.6) -- por eso vive fusionada con la
+    primera carga real en `load_model()`, no como un paso de arranque aparte.
+
+    Devuelve `(ok, reason)`. Si `ok=False`, `reason` es uno de:
+    "gpu_libraries_missing" | "gpu_out_of_memory" | "gpu_unavailable", clasificado
+    por SUBCADENA del `RuntimeError` (fragil por diseno -- mismo aviso de
+    fragilidad que la clasificacion de errores de yt-dlp, ARCHITECTURE.md Sec.5).
     """
-    models_dir = Path(models_dir)
-    models_dir.mkdir(parents=True, exist_ok=True)
+    import numpy as np
+
+    sample_rate = 16000
+    duration_seconds = 0.5
+    silence = np.zeros(int(sample_rate * duration_seconds), dtype=np.float32)
 
     try:
-        model = WhisperModel(
+        segments, _info = model.transcribe(silence, language="en", vad_filter=False)
+        list(segments)  # faster-whisper devuelve un generador: el trabajo ocurre al iterar
+    except RuntimeError as exc:
+        message = str(exc)
+        if "not found or cannot be loaded" in message:
+            return False, "gpu_libraries_missing"
+        if "out of memory" in message:
+            return False, "gpu_out_of_memory"
+        logger.warning("smoke_test_cuda: RuntimeError sin clasificar: %s", one_line(message))
+        return False, "gpu_unavailable"
+    except Exception as exc:  # cubo por defecto: tambien es "no funciona", nunca se propaga
+        logger.warning("smoke_test_cuda: fallo no RuntimeError: %s", one_line(str(exc)))
+        return False, "gpu_unavailable"
+
+    return True, None
+
+
+def _build_whisper_model(
+    model_id: str, models_dir: Path, choice: DeviceChoice, allow_download: bool
+):
+    """Construye el `WhisperModel` con el `DeviceChoice` dado, o CoreError.
+
+    Interno. No confirma que la GPU funcione (ver `load_model` para eso): esto
+    solo construye -- que, medido, tampoco falla aunque falten las DLL de CUDA
+    (ADR-0002 E8).
+    """
+    # OBLIGATORIO antes de importar faster_whisper/ctranslate2 (ADR-0002 E7): si el
+    # complemento de GPU no esta instalado, esta llamada no hace nada (lista vacia).
+    add_cuda_dlls_to_path()
+    from faster_whisper import WhisperModel  # import perezoso, ver cabecera del modulo
+
+    try:
+        return WhisperModel(
             model_id,
             device=choice.device,
             device_index=choice.device_index,
@@ -162,10 +459,54 @@ def load_model(
             technical=message,
         ) from exc
 
+
+def load_model(
+    model_id: str,
+    models_dir: Path,
+    choice: DeviceChoice,
+    allow_download: bool = False,
+) -> object:
+    """Carga (y si hace falta y se permite, descarga) un modelo faster-whisper.
+
+    Devuelve un MANEJADOR. No lo cachea en ninguna variable global: quien lo guarda
+    y quien lo suelta es `jobs.py` (ADR-0001 D22, lote 2). Con `allow_download=False`
+    y el modelo ausente, produce `CoreError(MODEL_MISSING)`.
+
+    **Lote 7 (ADR-0002 E8/Sec.6):** si `choice.device == "cuda"`, la prueba de humo
+    corre aqui mismo, fusionada con esta primera carga -- en el camino feliz cuesta
+    ~0,1 s porque el modelo ya estaba cargado. Si la prueba falla, se recarga en
+    CPU UNA VEZ (nunca se propaga el fallo como si fuera un error del trabajo) y el
+    `DeviceChoice` devuelto lleva `fell_back_from`/`fallback_reason` para que la
+    caida nunca sea muda (ARCHITECTURE.md Sec.3).
+    """
+    models_dir = Path(models_dir)
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    model = _build_whisper_model(model_id, models_dir, choice, allow_download)
+    final_choice = choice
+
+    if choice.device == "cuda":
+        ok, reason = smoke_test_cuda(model)
+        if not ok:
+            logger.warning(
+                "GPU no confirmada tras la prueba de humo (motivo=%s); se recarga en CPU",
+                reason,
+            )
+            fallback_choice = DeviceChoice(
+                device="cpu",
+                device_index=0,
+                compute_type=_CPU_COMPUTE_TYPE,
+                cpu_threads=choice.cpu_threads,
+                fell_back_from="cuda",
+                fallback_reason=reason,
+            )
+            model = _build_whisper_model(model_id, models_dir, fallback_choice, allow_download)
+            final_choice = fallback_choice
+
     # transcribe() necesita saber con que DeviceChoice se construyo este manejador
     # para rellenar TranscriptionResult.device_used, sin ampliar la firma publica
     # de transcribe() (que no recibe el device_choice como argumento aparte).
-    setattr(model, _ATTR_DEVICE_CHOICE, choice)
+    setattr(model, _ATTR_DEVICE_CHOICE, final_choice)
     return model
 
 

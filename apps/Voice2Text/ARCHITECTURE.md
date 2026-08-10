@@ -147,7 +147,10 @@ class TranscriptionResult:
     language_probability: float   # 0..1
     media_duration_seconds: float
     elapsed_seconds: float
-    speed_ratio: float            # media_duration / elapsed. Medido: 2.8 con small/int8/CPU [M]
+    speed_ratio: float            # media_duration / elapsed. CAMPO TECNICO: no se enseña
+                                  # nunca a una persona (ADR-0002 8.4), se convierte a
+                                  # "minutos por cada 10 de audio". Medido limpio con
+                                  # small/int8/CPU: 1.725x en espanol, 1.534x en ingles [M-dev]
     device_used: "DeviceChoice"   # con QUE se transcribio. Va al estado y a la cabecera del .md
 ```
 
@@ -541,6 +544,7 @@ guardan en memoria (una hora de audio ≈ 130 KB de texto [E]).
 |---|---|---|---|
 | `queued` | en cola | null | |
 | `probing` | yt-dlp pregunta título/duración sin descargar | null | origen enlace |
+| `detecting_language` | decodifica el audio **completo**, aplica VAD, calcula el espectrograma y detecta el idioma | null | siempre |
 | `fetching` | descarga del medio | `downloaded_bytes / total_bytes` | origen enlace |
 | `downloading_model` | descarga del modelo | bytes en disco / `expected_bytes` | falta el modelo |
 | `loading_model` | carga en memoria y cuantización int8 | null | no estaba cargado |
@@ -550,6 +554,14 @@ guardan en memoria (una hora de audio ≈ 130 KB de texto [E]).
 
 **Una barra por fase, no una barra global**: una barra única obliga a inventar pesos y a saltar hacia atrás
 cuando la estimación falla.
+
+> **Corrección medida en S11: `detecting_language` NO es instantáneo, y este documento daba a entender que
+> sí.** Decía que "hay barra de progreso desde el primer segundo". La detección **decodifica el archivo
+> entero y corre el VAD sobre el completo antes de mirar la ventana de detección**, así que su coste
+> **escala con la duración total**: **7,0 s para 2 min · 10,5 s para 10 min · 22,0 s para 37 min** [M-dev].
+> Es sublineal y barato en absoluto, pero para un archivo de una hora ese "primer segundo" son **varias
+> decenas de segundos**. Por eso es una fase con nombre propio y progreso indeterminado: si no se
+> nombrara, el usuario vería una ventana quieta sin saber si arrancó.
 
 ### 4.4 Estimación de tiempo restante
 
@@ -841,8 +853,9 @@ Marca de tiempo del **primer segmento del párrafo**. `[mm:ss]` si el medio dura
 
    **Lo que rellena esos huecos lo calcula `recommend_profile()` según el hardware** (ADR-0002 §3). En una
    máquina **sin GPU**, el preseleccionado es **`small` — 464 MB [M-dev]**, y el tiempo que hay que
-   escribir es **~8,7 min por cada 10 min de audio** (de 1,15× medido sobre audio real), **no 3,5**. En la
-   **1050 Ti** sería `large-v3-turbo` — 1,6 GB, ~1,4 min por cada 10.
+   escribir es **5,8 min por cada 10 min de audio en español · 6,5 min en inglés**. **Se publican las dos
+   cifras medidas, no una media ni la mejor**: los dos idiomas son objetivo del producto y ninguno se
+   redondea a su favor. En la **1050 Ti** sería `large-v3-turbo` — 1,6 GB, ~1,4 min por cada 10.
 
    **Obligatorio en esta pantalla, sin excepción** (ADR-0002 E3, obligación de transparencia): **los dos
    números** —cuánto se descarga **y** cuánto ocupará en RAM o VRAM al ejecutarse—, la ruta de destino, el
@@ -854,10 +867,19 @@ Marca de tiempo del **primer segmento del párrafo**. `[mm:ss]` si el medio dura
    > ya se leyó del revés una vez (un `2,8×` se transmitió como "28 minutos" en lugar de 3,6), con un
    > factor 8 de error. Una unidad que se puede leer al revés acabará leyéndose al revés.
    >
-   > **Historial de cifras falsas en esta misma pantalla, para no repetirlo una tercera vez:** primero puso
-   > "~2 min" (estimación de memoria), luego "~3-4 min" (derivada de un clip **sintético** de 42,7 s). La
-   > buena es **~8,7 min** [M-dev, audio real, `vad_filter=True`]. **El audio sintético sirve para probar
-   > el mecanismo, no para medir rendimiento, y su sesgo es optimista en una sola dirección.**
+   > **Historial de esta misma pantalla — es la CUARTA cifra, y hay que saber por qué esta sí:**
+   >
+   > | # | Cifra | De dónde salía | Por qué no valía |
+   > |---|---|---|---|
+   > | 1 | "~2 min" | estimación de memoria | nunca se midió nada |
+   > | 2 | "~3-4 min" | clip **sintético** de 42,7 s, sin `vad_filter` | no generaliza a habla continua; sesgo optimista |
+   > | 3 | "~8,7 min" | clip real de 360 s, **sin evidencia de aislamiento** | contaminada: había agentes trabajando en la misma CPU (ADR-0002 §8.6) |
+   > | **4** | **5,8 min (es) · 6,5 min (en)** | 10:18 de audio, código actual del repo | **es la primera con evidencia de aislamiento documentada**: `tasklist` sin `python.exe` competidor y CPU al 5-7 % antes y después de cada corrida |
+   >
+   > **Criterio para volver a cambiarla:** solo la sustituye otra medición que **también** traiga evidencia
+   > de aislamiento. Sin eso, no se toca. Dos lecciones ya pagadas: **el audio sintético sirve para probar
+   > el mecanismo, no para medir rendimiento** (sesgo optimista), y **una medición sin evidencia de
+   > aislamiento no es un dato, es una anécdota** (sesgo pesimista).
 
    Y una línea más, ahora que la GPU está aprobada: **qué dispositivo se va a usar**, con el estado
    tri-estado de §3 — *"Aceleración GPU: disponible (se confirma en el primer trabajo)"* / *"activa
@@ -895,6 +917,7 @@ lado, sus claves pisan a las de por defecto. **El motor nunca lee ninguno de los
 | **`word_timestamps`** | `true` | rellena `Segment.speech_end`. **Es lo único que permite cortar párrafo por las pausas del hablante** (§7). Coste medido en V3: ~0 %, dentro del ruido |
 | **`paragraph_gap_seconds`** | `2.0` | hueco a partir del cual se abre párrafo. Se ajusta contra material real **sin tocar código**, misma filosofía que D26 |
 | **`min_viable_speed_ratio`** | `1.0` | suelo del filtro de viabilidad (ADR-0002 E2): nunca se **recomienda** algo más lento que el tiempo real. El usuario sí puede elegirlo a mano |
+| **`language_confidence_warn_threshold`** | `0.75` | por debajo, la interfaz muestra un **aviso** (nunca un error) junto al selector manual `es`/`en`. **Cifra sin verificar**: la voz sintética nunca bajó de 0,995, así que no hay evidencia de dónde está el punto de quiebre (ADR-0002 V9) |
 | `max_input_bytes` | `2147483648` | tope de archivo/descarga (2 GiB) |
 | `output_formats` | `["txt","md"]` | qué se escribe |
 | `output_dir` | `null` | `null` = junto al origen |

@@ -1,21 +1,25 @@
 ---
 title: "Verificacion V1 (velocidad en espanol) y S11 (deteccion automatica de idioma)"
-status: completado, con una contaminacion metodologica declarada en V1
+status: "V1 y S11 completados en verde (repeticion limpia del 2026-08-10, segunda sesion)"
 fecha: 2026-08-10
 autor: Veritas (QA) -- verificacion independiente, sobre copias fuera del repo
 ---
 
 # Verificacion en espanol -- V1 y S11 (lote 1.b)
 
-> **BLUF:** S11 queda cerrado en verde: la deteccion automatica de idioma acierta espanol e
-> ingles con >99.5% de confianza en los cuatro clips probados, incluido el video real de
-> 36:49 del dueno sin recortar. **V1 NO queda cerrado en verde.** Se obtuvo una cifra real de
-> velocidad en espanol (algo que no existia hasta hoy), pero la maquina tenia **otro agente
-> corriendo transcripciones de faster-whisper en paralelo durante toda la medicion**
-> (evidencia de proceso incluida abajo), lo que degrado el resultado de forma medible y no
-> separable del efecto de idioma/duracion que V1 queria aislar. **Recomiendo no fijar
-> `base` como modelo por defecto (ADR-0001 D5) ni cerrar V1 con esta cifra** hasta repetir la
-> medicion en una maquina sin otros procesos de faster-whisper activos.
+> **BLUF (actualizado tras la repeticion limpia):** **V1 y S11 quedan cerrados en VERDE.** Se
+> repitio V1 en una maquina confirmada sin contencion (cero `python.exe` competidor, verificado
+> con `tasklist` antes y despues de cada corrida) y con el codigo ACTUAL del repo (commit
+> `032a3a1`, `vad_filter=True` + `word_timestamps=True`). **Resultado limpio: `small`/int8/CPU
+> procesa espanol a 1.725x tiempo real -- 5.80 min de proceso por cada 10 min de audio.** Un
+> control en ingles sobre el mismo hardware, misma sesion, mismo codigo (fragmento de 10:18 del
+> video real del dueno) dio 1.534x -- 6.52 min por cada 10 min. **Pregunta que quedaba
+> abierta, respondida: el espanol NO es mas lento que el ingles.** Si acaso, en esta medicion
+> salio ~11% MAS RAPIDO. La cifra de 0.93x/1.31x obtenida en el primer intento (mas abajo,
+> conservada como historial) fue enteramente explicable por la contencion de CPU documentada
+> entonces, no por el idioma. **Numero definitivo para ARCHITECTURE.md Sec.8 y la pantalla del
+> usuario: ~5.8 min de proceso por cada 10 min de audio en espanol con `small`/CPU/int8**
+> (ver cierre, mas abajo, para el detalle de que mas hay que actualizar).
 
 ---
 
@@ -24,7 +28,8 @@ autor: Veritas (QA) -- verificacion independiente, sobre copias fuera del repo
 | # | Verificacion | Veredicto |
 |---|---|---|
 | **Voz Sabina** | Confirmar `Microsoft Sabina Desktop` (es-MX) disponible para `System.Speech.Synthesis` | **VERDE** -- reconfirmado por esta maquina, no solo por lo dicho en el encargo (ver abajo) |
-| **V1** | Velocidad real, 10 min de audio en espanol, `small`/int8/CPU/`language="es"` | **AMARILLO -- medido, pero contaminado.** Cifra obtenida: `speed_ratio` 0.93x (mas lento que tiempo real). No es comparable de forma limpia con el 2.8x del spike: hubo contencion de CPU documentada durante toda la corrida |
+| **V1 (intento 1, misma fecha, sesion anterior)** | Velocidad real, 10 min de audio en espanol, `small`/int8/CPU/`language="es"` | **AMARILLO -- medido, pero contaminado.** Cifra obtenida: `speed_ratio` 0.93x (mas lento que tiempo real). Contencion de CPU documentada durante toda la corrida. **Conservado como historial, INVALIDADO, no usar** |
+| **V1 (repeticion limpia, misma fecha, sesion nueva)** | Igual que arriba, mas control en ingles sobre audio real (10:18) para separar idioma de contencion | **VERDE.** `speed_ratio` 1.725x en espanol (5.80 min/10min), 1.534x en ingles (6.52 min/10min). Maquina confirmada sin `python.exe` competidor antes y despues de cada corrida. Codigo actual del repo (`vad_filter=True`, `word_timestamps=True`) |
 | **S11** | Deteccion automatica (`language=None`) en espanol e ingles, incluido el video real sin recortar | **VERDE.** 4/4 detecciones correctas, probabilidad >= 99.5% en todos los casos. Coste de deteccion: 7-22 s segun la duracion total del archivo (no es gratis para archivos largos, ver hallazgo abajo) |
 
 ---
@@ -66,7 +71,12 @@ Microsoft Sabina Desktop | es-MX
 
 ---
 
-## V1 -- velocidad real con audio en espanol
+## V1 -- INTENTO 1 (INVALIDADO por contencion de CPU) -- conservado como historial
+
+**No usar esta cifra para nada.** Se deja completa, sin editar, porque el historial de
+cifras erroneas de este proyecto es informacion valiosa (ya paso dos veces con la pantalla
+de Sec.8: "~2 min", luego "~3-4 min", ver Sec.8 de ARCHITECTURE.md). La version limpia y
+valida esta en la seccion siguiente ("V1 -- REPETICION LIMPIA").
 
 ### Metodo
 
@@ -159,6 +169,122 @@ defecto, sin ADR nuevo."* La cifra medida (0.93x) tecnicamente dispara esa claus
 recomiendo dispararla con este dato.** Es una decision de producto con consecuencia real
 (cambiar el modelo por defecto que ve todo usuario nuevo) y la medicion que la sustentaria
 esta contaminada de forma documentada. Pedir una repeticion limpia antes de decidir.
+
+---
+
+## V1 -- REPETICION LIMPIA (2026-08-10, sesion nueva) -- ESTA ES LA CIFRA VALIDA
+
+### Por que se repite y que cambia respecto al intento 1
+
+El intento 1 (arriba) obtuvo una cifra real pero contaminada: `tasklist` mostro otro
+`python.exe` corriendo faster-whisper en paralelo durante toda la medicion, con evidencia de
+PID y tiempo de CPU acumulado documentada en su momento. Antes de repetir se confirmo con el
+dueno que **la maquina esta en reposo** (cero procesos Python activos) y que **nadie mas
+lanzaria nada** hasta terminar. Se repite ademas con una diferencia deliberada respecto al
+intento 1: **se anade un control en ingles de duracion comparable**, sobre el video real del
+dueno (no TTS), para poder separar por fin "efecto del idioma" de "efecto de la contencion" --
+la pregunta que quedo abierta la vez anterior.
+
+### Protocolo de medicion limpia -- evidencia de sistema en cada corrida
+
+**[M-dev]**
+
+| Momento | Comprobacion | Resultado |
+|---|---|---|
+| Antes de V1 (espanol) | `tasklist \| findstr python` | **0 procesos** `python.exe` |
+| Antes de V1 (espanol) | `wmic cpu get loadpercentage` | **5%** |
+| Despues de V1 (espanol) | `tasklist \| findstr python` | **0 procesos** `python.exe` |
+| Despues de V1 (espanol) | `wmic cpu get loadpercentage` | **3%** |
+| Despues de V1 (espanol) | `git status -sb -- apps/Voice2Text` | limpio -- nadie toco `transcribe.py`/`export.py`/`cli.py` durante la corrida |
+| Antes del control (ingles) | `tasklist \| findstr python` | **0 procesos** `python.exe` |
+| Antes del control (ingles) | `wmic cpu get loadpercentage` | **7%** |
+| Despues del control (ingles) | `tasklist \| findstr python` | **0 procesos** `python.exe` |
+| Despues del control (ingles) | `wmic cpu get loadpercentage` | 48-60% (ruido de fondo del sistema -- otras ventanas de Claude/navegador, **sin ningun `python.exe`** de por medio) |
+| Despues del control (ingles) | `git status -sb -- apps/Voice2Text` | limpio |
+| Durante ambas corridas | `apps/Voice2Text/models/models--Systran--faster-whisper-small` | sin cambios de fecha (solo lectura, `allow_download=False`) |
+| Antes y despues, video del dueno | tamano/fecha de `test/uvlVg3c2fCxBzKVk.mp4` | **23 201 476 bytes**, sin cambios -- no se toco ni se movio, se trabajo sobre una copia |
+
+**Ninguna corrida tuvo un `python.exe` competidor ni antes ni despues.** A diferencia del
+intento 1, aqui la comprobacion de sistema respalda la cifra en vez de invalidarla.
+
+### Metodo
+
+Copia fresca de `transcribe.py` + `errors.py` tomada del repo **despues** del commit
+`032a3a1` (word_timestamps/speech_end), confirmada byte a byte identica al original con
+`diff` antes de ejecutar nada. Mismo venv desechable reutilizado de la sesion anterior de
+este mismo lote (`faster-whisper 1.2.1`, `ctranslate2 4.8.1`, `av 18.0.0`, `numpy 2.4.6`).
+Misma llamada que usara produccion: `probe_devices()` + `resolve_device("small", caps,
+preference="cpu")` -> `load_model(allow_download=False)` -> `transcribe(..., vad_filter=True,
+word_timestamps=True)`, variando solo `language`.
+
+- **Espanol:** se reutilizo el audio TTS de 10:17.70 ya generado en la sesion anterior
+  (`es_10min.mp4`, voz Sabina, ~1585 palabras) -- el propio encargo pedia reutilizarlo si
+  seguia en el temporal, y seguia. `language="es"`.
+- **Control en ingles:** recorte de **618.0 s** (comparable a los 617.7 s del audio en
+  espanol, diferencia de 0.3 s) tomado por remuxado con PyAV (sin reencode, sin ffmpeg) de
+  una **copia** de `test/uvlVg3c2fCxBzKVk.mp4` -- el original nunca se abrio en modo
+  escritura. `language="en"`.
+
+### Resultado directo
+
+**[M-dev]**
+
+| Metrica | Espanol (V1) | Ingles (control) |
+|---|---:|---:|
+| Duracion del audio | 617.697 s (10:17.70) | 618.022 s (10:18.02) |
+| Tiempo de proceso (`elapsed_seconds`) | 358.094 s (5:58.09) | 402.828 s (6:42.83) |
+| `speed_ratio` (duracion/proceso) | **1.725x** | **1.534x** |
+| **Minutos de proceso por cada 10 min de audio** | **5.80 min** | **6.52 min** |
+| Idioma | `es`, forzado (`language="es"`) | `en`, forzado (`language="en"`) |
+| Segmentos | 123 | 153 |
+| Palabras / segundo de audio (texto plano, incl. silencios) | 2.46 (1519 palabras) | 3.19 (1972 palabras) |
+| Carga del modelo (`small`, ya en disco) | 2.22 s | 1.66 s |
+
+**Los dos resultados estan muy por encima de tiempo real (>1x) y muy por debajo del 2.8x del
+spike original** (`SPIKE-RESULTS.md`, clip sintetico de 42.7 s en ingles). Esto confirma lo
+que ya senalaba el intento 1: el 2.8x del spike no generaliza a habla continua mas larga --
+pero ahora, sin contencion de por medio, el numero real es **mejor que el intento 1 dio a
+entender** (1.72x-1.53x, no 0.93x-1.31x). La caida respecto al spike es real, pero **no cruza
+a "mas lento que tiempo real"** como parecia con la medicion contaminada.
+
+### La pregunta abierta, respondida: no es el idioma, era la contencion
+
+En esta medicion, con ambos idiomas corridos en la misma sesion, mismo hardware, mismo
+codigo, duraciones comparables (diferencia de 0.3 s) y sin contencion verificada en ninguna de
+las dos corridas: **el espanol proceso mas rapido que el ingles (1.725x contra 1.534x), no mas
+lento.** Esto contradice directamente la hipotesis de "el espanol es mas lento de procesar",
+y es coherente con que la caida observada en el intento 1 (0.93x, incluso peor que el 1.31x
+del clip de control de aquel dia) fuera explicable por completo por la contencion de CPU
+documentada entonces.
+
+**Advertencia honesta, no una conclusion mas fuerte de lo que da la evidencia:** esta NO es
+una comparacion perfectamente controlada de idioma. El audio en espanol es voz sintetica
+(TTS, texto calibrado, cadencia uniforme, 2.46 palabras/s); el audio en ingles es una
+grabacion real (presentacion tecnica, cadencia natural, 3.19 palabras/s -- casi 30% mas denso
+en palabras por segundo de reloj). Parte de la diferencia de 0.19x entre ambos bien podria
+venir de esa densidad de habla (mas texto real que decodificar, menos silencio que el VAD
+recorta), no del idioma como tal. Lo que **si** queda demostrado con esta evidencia es lo
+que realmente le importa al producto: **no hay senal de que el espanol, en si mismo, sea mas
+costoso de procesar que el ingles con este modelo.** La hipotesis que si quedaba en pie tras
+el intento 1 -- "la contencion basta para explicar toda la caida" -- es ahora la explicacion
+que mejor encaja con los datos limpios.
+
+### Veredicto V1
+
+**VERDE.** La medicion de hoy tiene evidencia de sistema (tasklist + wmic + git status) antes
+y despues de cada corrida, use el codigo actual del repo, y esta calculada exactamente en la
+unidad obligatoria del proyecto (ADR-0001 D5, ARCHITECTURE.md Sec.8.4). **Numero definitivo:
+`small`/int8/CPU procesa espanol a 1.725x tiempo real -- 5.80 minutos de proceso por cada 10
+minutos de audio.**
+
+**Efecto sobre ADR-0001 D5:** la clausula dice *"si 10 minutos de audio en espanol dan menos
+de 3x tiempo real, `base` pasa a ser el modelo por defecto, sin ADR nuevo"*. **1.725x es
+menor que 3x: la clausula se dispara con esta medicion limpia.** A diferencia del intento 1,
+esta vez no hay motivo documentado para no confiar en el numero. **Recomiendo a quien tenga
+permiso de escritura sobre ARCHITECTURE.md/settings.py aplicar el cambio de modelo por
+defecto a `base`** (o, como minimo, decidirlo explicitamente en un ADR si el equipo prefiere
+no aplicar la clausula automatica) -- esta verificadora no lo aplica porque el encargo limita
+la unica escritura en el repo a este archivo.
 
 ---
 
@@ -275,22 +401,30 @@ en espanol de este informe:
 3. El coste de la deteccion automatica escala con la duracion total del archivo (7-22 s en
    el rango probado), un dato nuevo que ARCHITECTURE.md Sec.4.3 no contemplaba de forma
    explicita.
+4. **V1 cierra en verde, con repeticion limpia:** `small`/int8/CPU procesa 10 min de audio
+   en espanol a **1.725x tiempo real (5.80 min de proceso por cada 10 min de audio)**, medido
+   en una corrida sin `python.exe` competidor (evidencia de `tasklist`/`wmic`/`git status`
+   antes y despues, ver seccion "V1 -- REPETICION LIMPIA"), con el codigo actual del repo
+   (`vad_filter=True`, `word_timestamps=True`, commit `032a3a1`).
+5. **La pregunta de idioma-vs-contencion, respondida:** un control en ingles de duracion
+   comparable (618.0 s contra 617.7 s), mismo hardware, misma sesion, dio 1.534x (6.52
+   min/10min) -- mas lento que el espanol, no mas rapido. No hay senal de que el espanol sea
+   inherentemente mas costoso de procesar con este modelo; la caida observada en el intento 1
+   (0.93x) es explicable en su totalidad por la contencion de CPU que se documento entonces.
 
 **Sin demostrar:**
 
-1. **La velocidad real de V1 en condiciones limpias.** El numero obtenido (0.93x en el clip
-   de 10 min, 1.31x en el de control de 2 min) esta contaminado por contencion de CPU con
-   otro agente trabajando en paralelo en esta misma maquina, con evidencia de proceso
-   (PID, tiempo de CPU acumulado, carga de sistema) documentada arriba. **Hace falta una
-   repeticion en una maquina sin otros procesos de faster-whisper activos** antes de tratar
-   cualquiera de estas cifras como definitiva.
-2. Si el factor sobre tiempo real cambia genuinamente por audio largo o por idioma -- la
-   pregunta original de V1 -- sigue sin poder responderse: la contencion es una explicacion
-   alternativa suficiente para toda la caida observada, y no se puede descartar con los
-   datos de hoy.
-3. El umbral de confianza bajo el cual avisar al usuario en S11: no aparecio ningun caso de
+1. Si la diferencia de 0.19x entre el control en ingles (1.534x) y el espanol (1.725x) de
+   hoy es ruido de sesion, densidad de habla (el ingles real tuvo ~30% mas palabras por
+   segundo que el TTS en espanol) o alguna otra variable -- no hace falta resolverlo para
+   cerrar V1: lo que importa para el producto es que el espanol no salio peor, y eso ya
+   queda demostrado con la evidencia de hoy.
+2. El umbral de confianza bajo el cual avisar al usuario en S11: no aparecio ningun caso de
    confianza baja con voz sintetica, asi que el 70-80% sugerido es una propuesta sin
    verificar, no una cifra medida.
+3. Calidad de transcripcion con habla humana real en espanol (con acento, ruido, solapes):
+   fuera del alcance de V1/S11, que miden velocidad y deteccion de idioma, no calidad de
+   texto (ver "Limite obligatorio" arriba).
 
 **Contradice lo que dan por supuesto el ADR y ARCHITECTURE.md, y hay que decirlo sin
 adornos:**
@@ -298,24 +432,37 @@ adornos:**
 - **ARCHITECTURE.md Sec.3 cita el 2.8x del spike como la cifra de referencia de
   `speed_ratio`** (`"Medido: 2.8 con small/int8/CPU [M]"`), y Sec.8 exige mostrar al usuario
   "el tiempo estimado por cada 10 minutos de audio... con la cifra que salga de V1, nunca
-  una redondeada a la baja". La cifra que salio de V1 hoy (incluso en su version menos
-  contaminada, el control de 2 minutos) implica **~7.6 a ~10.8 minutos de proceso por cada
-  10 minutos de audio**, no los ~3.6 minutos que implicaria extrapolar el 2.8x del spike.
-  Si esta brecha se confirma en una repeticion limpia -- y no es pura contencion --, el
-  2.8x del spike **no generaliza** de un clip de 42.7 s en ingles a habla continua mas larga
-  en espanol, y **la copia de la pantalla de primer arranque (Sec.8) necesitaria la cifra
-  real, no el 2.8x**, antes de publicarse.
+  una redondeada a la baja". **La cifra limpia de V1 es 5.80 min por cada 10 min de audio en
+  espanol, no los ~3.6 minutos que implicaria extrapolar el 2.8x del spike, y tampoco el
+  ~8.7 min que cita hoy Sec.8 (ese numero viene de una corrida distinta, `SPIKE-GPU-RESULTS.md`
+  Sec.3, sobre un clip de 360 s en ingles del video del dueno -- 1.15x, no 1.534x como salio
+  hoy en el control comparable de 618 s). El 2.8x del spike original no generaliza de un
+  clip sintetico de 42.7 s a habla continua mas larga**, y **Sec.8 necesita actualizar la
+  cifra que se le muestra al usuario a la de V1 (5.80 min, espanol) antes de publicarse** --
+  esta verificadora no la aplica porque la unica escritura autorizada en el repo hoy es este
+  archivo.
 - **ADR-0001 D5 / ARCHITECTURE.md Sec.13** fijan una regla mecanica: por debajo de 3x,
-  `base` pasa a ser el modelo por defecto sin ADR nuevo. La cifra de hoy dispara esa regla,
-  pero **no deberia aplicarse todavia**: la contencion de CPU documentada es motivo
-  suficiente para no confiar en el numero como base de una decision de producto.
+  `base` pasa a ser el modelo por defecto sin ADR nuevo. **La cifra limpia de hoy (1.725x)
+  SI dispara esa regla, y esta vez no hay motivo documentado para no confiarla**: la
+  contencion que invalidaba el intento 1 no aparece en esta medicion (evidencia de sistema
+  arriba). Recomiendo aplicar el cambio o decidir explicitamente no hacerlo, pero no dejarlo
+  sin decision -- la condicion que el propio ADR fijo para decidir ya se cumplio con datos
+  limpios.
 - **Nada de esto contradice S1, S5, S6 ni S8** (los verdes del spike original): la
   invariante "cero ffmpeg" se sostuvo, y el hilo de progreso pudo haber seguido respondiendo
   igual (no se remidio el GIL aqui, pero no hay motivo para dudar de S5 con este resultado).
+- **Discrepancia sin resolver, para que quede anotada:** el control en ingles de hoy (1.534x,
+  clip de 618 s) y el `small`/CPU medido en `SPIKE-GPU-RESULTS.md` (1.15x, clip de 360 s, la
+  MISMA fuente de video) no coinciden, y aquella corrida no documento evidencia de
+  contencion de sistema como esta lo hace. No es materia de V1 resolver esa brecha, pero
+  cualquiera que use el 1.15x/~8.7 min de Sec.8 despues de hoy deberia saber que hay una
+  medicion mas nueva, con mas evidencia de aislamiento, que da un numero distinto.
 
 ---
 
 ## Evidencia (rutas absolutas, fuera del repo -- se borran al cerrar la sesion)
+
+**Intento 1 (invalidado), sesion anterior:**
 
 - Texto fuente en espanol (~1585 palabras): `...\scratchpad\v1-s11\text_es.txt`
 - Audio generado con Sabina (10:17.70): `...\scratchpad\v1-s11\audio\es_10min.wav` /
@@ -328,6 +475,25 @@ adornos:**
 - Scripts usados: `run_v1.py`, `run_control.py`, `run_s11_detect_only.py`, `trim_remux.py`,
   `build_mp4.py`, `speak_es.ps1`, `calib.ps1`, `list-voices.ps1`, todos en
   `...\scratchpad\v1-s11\`
+
+**Repeticion limpia (VALIDA), sesion nueva, misma fecha:**
+
+- Copia del codigo actual del repo (post-commit `032a3a1`, verificada identica con `diff`):
+  `...\scratchpad\v1-s11-v2\py\transcribe.py`, `...\scratchpad\v1-s11-v2\py\errors.py`
+- Audio en espanol reutilizado del intento 1 (mismo archivo, sin regenerar):
+  `...\scratchpad\v1-s11-v2\audio\es_10min.mp4` (617.697 s)
+- Copia del video real del dueno (el original en `apps/Voice2Text/test/` nunca se abrio en
+  escritura): `...\scratchpad\v1-s11-v2\audio\owner_source_copy.mp4`
+- Control en ingles, recorte de 618.0 s por remuxado PyAV sin reencode de la copia de arriba:
+  `...\scratchpad\v1-s11-v2\audio\en_owner_comparable.mp4`
+- Script de medicion (una sola version para ambos idiomas, `language` como argumento):
+  `...\scratchpad\v1-s11-v2\run_measure.py`
+- Logs de consola completos de ambas corridas (incluyen las comprobaciones de `tasklist`/
+  `wmic` antes y despues): `...\scratchpad\v1-s11-v2\run_v1_es.log`,
+  `...\scratchpad\v1-s11-v2\run_en_control.log`
+- Transcripts y resumen JSON de cada corrida: `...\scratchpad\v1-s11-v2\out\transcript_v1_es.txt`,
+  `...\scratchpad\v1-s11-v2\out\summary_v1_es.json`, `...\scratchpad\v1-s11-v2\out\transcript_v1_en_control.txt`,
+  `...\scratchpad\v1-s11-v2\out\summary_v1_en_control.json`
 
 (Ruta base omitida por brevedad: `C:\Users\byrae\AppData\Local\Temp\claude\D---IAG-Tools\
 b15c6440-b133-49de-b26e-860ad84d6d30\scratchpad\`. El directorio temporal se borrara al

@@ -1,0 +1,32 @@
+# Voice2Text - dependencias OPCIONALES de aceleracion GPU (lote 7, ADR-0002 E5/E6)
+#
+# Instala esto SOLO si tienes una GPU NVIDIA y quieres acelerar la transcripcion
+# varias veces frente a CPU (la cifra exacta depende del modelo y esta pendiente de
+# remedirse en condiciones aisladas, ADR-0002 V8: no se publica un numero suelto
+# hasta entonces). Anade unos 2 GB sobre la instalacion base (~795 MB) [M-dev]: no
+# es un paquete que nadie deba instalar por accidente. Ejecutalo con
+# install-gpu.ps1, no hagas `pip install -r` a mano sobre este archivo salvo que
+# sepas lo que haces (no queda registrado en ningun sitio si lo haces asi).
+#
+# REGLA DURA (ADR-0002 E6): ctranslate2 y nvidia-cudnn-cu12 se fijan JUNTOS, NUNCA
+# por separado. CTranslate2 cambio de cuDNN 8 a 9 en su version 4.5 y pip NO
+# comprueba esa correspondencia: si algun dia se sube el pin de ctranslate2 sin
+# subir tambien el de nvidia-cudnn-cu12 (o al reves), el choque de ABI aparece en
+# tiempo de EJECUCION, no al instalar, con un mensaje identico al de "no tengo las
+# librerias" (SPIKE-GPU-RESULTS.md Sec.1). Si se suben las versiones, se suben las
+# tres juntas y se prueba la instalacion completa antes de commitear.
+#
+# Versiones fijadas [M-dev, 2026-08-10, GTX 1050 Ti, driver 560.94]:
+ctranslate2==4.8.1
+nvidia-cudnn-cu12==9.24.0.43
+nvidia-cublas-cu12==12.9.2.10
+
+# Transitiva de nvidia-cublas-cu12 (compilacion JIT). Nadie la pide a mano, pero
+# pip la trae de todas formas [M-dev] -- se fija tambien para que
+# "pip install -r requirements-gpu.txt" sea reproducible y no dependa de que
+# resuelva pip ese dia:
+nvidia-cuda-nvrtc-cu12==12.9.86
+
+# NO se lista faster-whisper aqui: ya lo instala requirements.txt (base,
+# obligatorio). Este archivo solo anade lo que hace falta para que ESA misma
+# instalacion pueda usar CUDA.

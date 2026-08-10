@@ -5,7 +5,11 @@
 # Sin tope de version: no hay ningun requisito de compatibilidad conocido todavia.
 faster-whisper
 
-# Se anaden en lotes posteriores, cuando el codigo que los usa exista:
-#   yt-dlp     (lote 4, fetch.py)  -- SIN techo de version (ADR-0001 D del stack:
-#                                      persigue cambios de plataforma continuos)
+# fetch.py (lote 4): enlaces de YouTube/TikTok/X/Facebook, aislado y opcional (D7).
+# SIN techo de version: persigue cambios continuos de las plataformas (ADR-0001 Sec.9,
+# "yt-dlp es una dependencia viva"). Se actualiza con:
+#   py -3 -m pip install --upgrade yt-dlp
+yt-dlp
+
+# Se anade en un lote posterior, cuando el codigo que lo usa exista:
 #   pywebview  (lote 3, app.py)

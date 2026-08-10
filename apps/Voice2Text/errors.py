@@ -27,6 +27,12 @@ class ErrorCode(str, Enum):
     QUEUE_FULL = "queue_full"
     CANCELLED = "cancelled"
     INTERNAL = "internal"
+    # Lote 7 (ADR-0002 E10): los tres modos de fallo de CUDA son RuntimeError, pero
+    # piden acciones distintas -- reparar instalacion, elegir modelo menor, o nada.
+    # Se distinguen por subcadena del mensaje en transcribe.smoke_test_cuda().
+    GPU_LIBRARIES_MISSING = "gpu_libraries_missing"
+    GPU_OUT_OF_MEMORY = "gpu_out_of_memory"
+    GPU_UNAVAILABLE = "gpu_unavailable"
 
 
 class CoreError(Exception):
