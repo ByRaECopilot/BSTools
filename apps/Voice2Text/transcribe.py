@@ -29,7 +29,14 @@ logger = logging.getLogger(__name__)
 class Segment:
     index: int          # 0,1,2... correlativo
     start: float         # segundos desde el inicio del medio
-    end: float
+    end: float            # fin del CONTENEDOR del segmento. OJO: faster-whisper lo ESTIRA
+                          # hasta el inicio del siguiente, absorbiendo el silencio (medido,
+                          # ver ARCHITECTURE.md Sec.7 y la verificacion V2 del lote 1.b:
+                          # el hueco sigue siendo 0 incluso con vad_filter=True)
+    speech_end: Optional[float]   # fin real del habla = end de la ULTIMA PALABRA.
+                          # None si word_timestamps=False. Es el UNICO campo que ve los
+                          # silencios (verificado V4: start SI marca el inicio real del
+                          # habla, con o sin word_timestamps -- pero end no lo hace nunca)
     text: str            # ya recortado
 
 
@@ -193,6 +200,8 @@ def transcribe(
     *,
     language: Optional[str] = None,        # None = deteccion automatica
     vad_filter: bool = True,
+    word_timestamps: bool = True,          # rellena Segment.speech_end (ver Segment,
+                                            # ARCHITECTURE.md Sec.7, verificaciones V2/V3/V4)
     on_segment: Callable[[Segment, float], None],   # (segmento, progreso 0..1)
     should_cancel: Callable[[], bool],
 ) -> TranscriptionResult:
@@ -221,6 +230,7 @@ def transcribe(
             str(media_path),
             language=language,
             vad_filter=vad_filter,
+            word_timestamps=word_timestamps,
         )
     except Exception as exc:
         raise CoreError(
@@ -237,10 +247,15 @@ def transcribe(
             if should_cancel():
                 raise CoreError(ErrorCode.CANCELLED, details={}, technical="")
 
+            # raw.words es None si word_timestamps=False; si esta activo, es una lista
+            # (posiblemente vacia en un segmento sin palabras reconocidas -- p.ej. ruido).
+            speech_end = raw.words[-1].end if raw.words else None
+
             segment = Segment(
                 index=index,
                 start=raw.start,
                 end=raw.end,
+                speech_end=speech_end,
                 text=raw.text.strip(),
             )
             segments.append(segment)

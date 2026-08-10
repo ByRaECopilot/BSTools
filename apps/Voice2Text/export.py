@@ -35,19 +35,35 @@ class WrittenFile:
     bytes: int
 
 
-def _group_paragraphs(segments: list[Segment]) -> list[list[Segment]]:
-    """Aplica las tres reglas de corte de parrafo de ARCHITECTURE.md Sec.7."""
+def _group_paragraphs(
+    segments: list[Segment],
+    paragraph_gap_seconds: float = _PARAGRAPH_GAP_SECONDS,
+) -> list[list[Segment]]:
+    """Aplica las tres reglas de corte de parrafo de ARCHITECTURE.md Sec.7.
+
+    Regla 1 (hueco de pausa) se calcula SIEMPRE con `speech_end`, nunca con `end`
+    -- `end` esta estirado por faster-whisper hasta el `start` del segmento
+    siguiente y el hueco medido ahi es SIEMPRE 0 (verificado en el lote 1.b, V2,
+    incluso con vad_filter=True). Si `speech_end` es `None` (word_timestamps
+    desactivado) la regla 1 se DESACTIVA ENTERA para ese hueco: no se finge una
+    pausa que no se puede medir. Las reglas 2 y 3 no dependen de `speech_end` y
+    siguen activas siempre.
+    """
     paragraphs: list[list[Segment]] = []
     current: list[Segment] = []
     current_len = 0
-    previous_end: float | None = None
+    previous_speech_end: float | None = None
 
     for segment in segments:
-        gap = (segment.start - previous_end) if previous_end is not None else 0.0
+        gap = (
+            (segment.start - previous_speech_end)
+            if previous_speech_end is not None
+            else None
+        )
         ends_sentence = bool(current) and current[-1].text.rstrip().endswith(_SENTENCE_ENDINGS)
 
         starts_new = False
-        if current and gap > _PARAGRAPH_GAP_SECONDS:
+        if current and gap is not None and gap > paragraph_gap_seconds:
             starts_new = True
         elif current and current_len >= _PARAGRAPH_SOFT_LIMIT_CHARS and ends_sentence:
             starts_new = True
@@ -61,7 +77,7 @@ def _group_paragraphs(segments: list[Segment]) -> list[list[Segment]]:
 
         current.append(segment)
         current_len += len(segment.text) + 1
-        previous_end = segment.end
+        previous_speech_end = segment.speech_end
 
     if current:
         paragraphs.append(current)
@@ -73,8 +89,11 @@ def _paragraph_text(group: list[Segment]) -> str:
     return " ".join(s.text for s in group if s.text).strip()
 
 
-def to_plain_text(segments: list[Segment]) -> str:
-    paragraphs = _group_paragraphs(segments)
+def to_plain_text(
+    segments: list[Segment],
+    paragraph_gap_seconds: float = _PARAGRAPH_GAP_SECONDS,
+) -> str:
+    paragraphs = _group_paragraphs(segments, paragraph_gap_seconds)
     blocks = [_paragraph_text(group) for group in paragraphs]
     return "\n\n".join(block for block in blocks if block)
 
@@ -88,8 +107,12 @@ def _format_timestamp(seconds: float, use_hours: bool) -> str:
     return "%02d:%02d" % (mm, ss)
 
 
-def to_markdown(segments: list[Segment], meta: dict[str, Any]) -> str:
-    paragraphs = _group_paragraphs(segments)
+def to_markdown(
+    segments: list[Segment],
+    meta: dict[str, Any],
+    paragraph_gap_seconds: float = _PARAGRAPH_GAP_SECONDS,
+) -> str:
+    paragraphs = _group_paragraphs(segments, paragraph_gap_seconds)
     duration = meta.get("media_duration_seconds") or 0.0
     use_hours = duration >= _HOUR_SECONDS
 
@@ -165,6 +188,7 @@ def write_outputs(
     base_name: str,
     formats: list[str],
     overwrite: bool = False,
+    paragraph_gap_seconds: float = _PARAGRAPH_GAP_SECONDS,
 ) -> list[WrittenFile]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -173,9 +197,9 @@ def write_outputs(
     written: list[WrittenFile] = []
     for fmt in formats:
         if fmt == "txt":
-            content = to_plain_text(segments)
+            content = to_plain_text(segments, paragraph_gap_seconds)
         elif fmt == "md":
-            content = to_markdown(segments, meta)
+            content = to_markdown(segments, meta, paragraph_gap_seconds)
         else:
             raise ValueError(f"unsupported format: {fmt}")
 

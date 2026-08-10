@@ -48,6 +48,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--compute-type", default=None, help="fija a mano para depurar (por defecto, lo decide resolve_device())")
     parser.add_argument("--cpu-threads", type=int, default=None, help="fija a mano para depurar (por defecto, 0 = decide CTranslate2)")
     parser.add_argument("--no-vad", action="store_true", help="desactiva el filtro de silencios")
+    parser.add_argument(
+        "--no-word-timestamps", action="store_true",
+        help="desactiva word_timestamps (Segment.speech_end queda en None; se desactiva la regla de corte por pausa)",
+    )
+    parser.add_argument(
+        "--paragraph-gap-seconds", type=float, default=None,
+        help="hueco de pausa (segundos) que abre parrafo nuevo; por defecto, el de export.py (2.0)",
+    )
     parser.add_argument("--no-download", action="store_true", help="no descargar el modelo si falta")
     return parser.parse_args(argv)
 
@@ -122,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
             model,
             language=args.language,
             vad_filter=not args.no_vad,
+            word_timestamps=not args.no_word_timestamps,
             on_segment=on_segment,
             should_cancel=should_cancel,
         )
@@ -155,8 +164,14 @@ def main(argv: list[str] | None = None) -> int:
         "transcribed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
 
+    write_kwargs = {}
+    if args.paragraph_gap_seconds is not None:
+        write_kwargs["paragraph_gap_seconds"] = args.paragraph_gap_seconds
+
     try:
-        written = export.write_outputs(result.segments, meta, output_dir, media_path.stem, formats)
+        written = export.write_outputs(
+            result.segments, meta, output_dir, media_path.stem, formats, **write_kwargs
+        )
     except OSError as exc:
         _print(f"ERROR al escribir la salida: {exc}")
         return 1
