@@ -185,6 +185,34 @@ const NODE_COLORS = {
 const COLOR_BY_STROKE = Object.fromEntries(
   Object.entries(NODE_COLORS).map(([key, [stroke]]) => [stroke.toLowerCase(), key]));
 
+// --- auto-contraste del texto sobre un relleno solido (WCAG 2.x) -------------
+// Formula oficial de luminancia relativa: linealiza cada canal y pondera segun
+// la sensibilidad del ojo (verde > rojo > azul).
+function relLuminance(r, g, b) {
+  const lin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+// admite '#rgb' y '#rrggbb'; devuelve [r,g,b] normalizados a 0..1.
+function parseHex(hex) {
+  let h = String(hex).replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
+}
+// ratio de contraste WCAG entre dos luminancias relativas (siempre >= 1).
+function contrastRatio(l1, l2) {
+  const hi = Math.max(l1, l2), lo = Math.min(l1, l2);
+  return (hi + 0.05) / (lo + 0.05);
+}
+const TEXT_DARK = '#111827', TEXT_LIGHT = '#f8fafc';
+const TEXT_DARK_L = relLuminance(...parseHex(TEXT_DARK));
+const TEXT_LIGHT_L = relLuminance(...parseHex(TEXT_LIGHT));
+// Elige el candidato (oscuro o claro) con mejor ratio de contraste real contra
+// el relleno dado, no un umbral de luminancia a ojo.
+function textOn(hexFill) {
+  const L = relLuminance(...parseHex(hexFill));
+  return contrastRatio(L, TEXT_DARK_L) >= contrastRatio(L, TEXT_LIGHT_L) ? TEXT_DARK : TEXT_LIGHT;
+}
+
 function drawNode(n) {
   const g = document.createElementNS(SVGNS, 'g');
   g.setAttribute('class', 'node' + (selection && selection.type === 'node' && selection.id === n.id ? ' sel' : ''));
@@ -192,9 +220,11 @@ function drawNode(n) {
   g.dataset.id = n.id;
 
   const shape = shapeGeometry(n.shape, n.w, n.h);
+  let labelFill = null;
   if (n.color !== 'default' && NODE_COLORS[n.color]) {
     const [stroke, fill] = NODE_COLORS[n.color];
     shape.style.fill = fill; shape.style.stroke = stroke;
+    labelFill = textOn(fill);
   }
   g.appendChild(shape);
 
@@ -217,6 +247,7 @@ function drawNode(n) {
   const t = document.createElementNS(SVGNS, 'text');
   t.setAttribute('class', 'node-label');
   setAttrs(t, { x: n.w / 2, y: n.h / 2 });
+  if (labelFill) t.style.fill = labelFill;
   lines.forEach((ln, i) => {
     const ts = document.createElementNS(SVGNS, 'tspan');
     setAttrs(ts, { x: n.w / 2, dy: i === 0 ? -(lines.length - 1) * 8 : 16 });
@@ -327,7 +358,7 @@ function buildCode() {
   if (styled.length) lines.push('');
   for (const n of styled) {
     const [stroke, fill] = NODE_COLORS[n.color];
-    lines.push(`    style ${n.id} fill:${fill},stroke:${stroke},stroke-width:2px,color:#111`);
+    lines.push(`    style ${n.id} fill:${fill},stroke:${stroke},stroke-width:2px,color:${textOn(fill)}`);
   }
   return lines.join('\n');
 }

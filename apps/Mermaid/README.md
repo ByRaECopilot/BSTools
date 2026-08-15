@@ -106,7 +106,11 @@ Elige el tipo en la barra izquierda **antes** de conectar; para cambiar una
 flecha ya creada, selecciónala y pulsa otro tipo.
 
 **Color de nodo:** selecciona un nodo y elige un color en la barra flotante. Se
-traduce a una línea `style` en el código.
+traduce a una línea `style` en el código. El texto de la etiqueta se
+auto-contrasta contra ese relleno (oscuro o claro, el que dé mejor lectura),
+tanto en el lienzo como en el código exportado — así se ve bien en tema claro
+y en tema oscuro. Un nodo sin color no lleva `style` y el texto sigue el color
+del tema.
 
 ---
 
