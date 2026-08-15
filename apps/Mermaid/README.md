@@ -54,7 +54,16 @@ registro guardan rutas absolutas).
    actualiza** — cambia una etiqueta, añade un nodo o una flecha en el texto y
    el lienzo se reconstruye solo. La pestaña *Vista previa* muestra el diagrama
    renderizado por Mermaid.
-5. **Exporta:** botón *Copiar* (al portapapeles), o descarga `.mmd`, `.svg` o
+5. **Agrupa nodos en una caja** (`subgraph` de Mermaid): `Shift`+clic sobre
+   varios nodos para seleccionarlos, y pulsa **Agrupar** en la barra superior.
+   La caja se dibuja automáticamente alrededor de sus nodos — no tiene tamaño
+   propio, así que siempre "abraza" a sus miembros, aunque los muevas.
+   Arrástrala por su **cabecera o su borde** (el interior sigue siendo lienzo:
+   clic y arrastre normales a los nodos que haya dentro). Al borrarla
+   (*Desagrupar*, tecla `Supr`) solo desaparece la caja: sus nodos sobreviven
+   sueltos. Para sacar un único nodo de su grupo sin borrar nada, selecciónalo
+   y pulsa **Sacar del grupo** en la barra flotante.
+6. **Exporta:** botón *Copiar* (al portapapeles), o descarga `.mmd`, `.svg` o
    `.png`.
 
 El diagrama se guarda solo en el navegador (`localStorage`): al reabrir el
@@ -66,8 +75,8 @@ En la barra izquierda, sección **Diagramas**: escribe un nombre y pulsa
 *Guardar*. Cada diagrama se guarda como **dos archivos** en `graphs/`:
 
 - `nombre.mmd` — el código Mermaid, reutilizable en cualquier sitio.
-- `nombre.layout.json` — posiciones, formas, colores y dirección, para restaurar
-  el lienzo **exactamente** como lo dejaste.
+- `nombre.layout.json` — posiciones, formas, colores, grupos y dirección, para
+  restaurar el lienzo **exactamente** como lo dejaste.
 
 Debajo aparece la lista de diagramas guardados: clic en uno para cargarlo, o en
 la **✕** para borrarlo (borra sus dos archivos). Al abrir un `.mmd` desde el
@@ -82,8 +91,13 @@ suben al repositorio.
 | Acción | Cómo |
 |---|---|
 | Mover un nodo | Arrastrarlo |
+| Seleccionar varios nodos | `Shift`+clic sobre cada uno |
+| Agrupar la selección | Botón **Agrupar** (barra superior, activo con selección múltiple) |
+| Mover un grupo | Arrastrar su cabecera o su borde (el interior sigue siendo lienzo) |
+| Sacar un nodo de su grupo | Seleccionarlo → **Sacar del grupo** en la barra flotante |
+| Desagrupar (borra solo la caja) | Seleccionar el grupo → **Desagrupar** (o `Supr`) |
 | Conectar | Arrastrar desde un punto azul del nodo a otro nodo |
-| Editar texto | Doble clic en nodo o flecha |
+| Editar texto / nombre de grupo | Doble clic en nodo, flecha o cabecera del grupo |
 | Editar el código | Escribir en el panel derecho (el diagrama se actualiza) |
 | Seleccionar | Clic (aparece una barra con color / editar / borrar) |
 | Borrar | Tecla `Supr` con algo seleccionado |
@@ -105,12 +119,16 @@ Preparar/hexágono `{{ }}`.
 Elige el tipo en la barra izquierda **antes** de conectar; para cambiar una
 flecha ya creada, selecciónala y pulsa otro tipo.
 
-**Color de nodo:** selecciona un nodo y elige un color en la barra flotante. Se
-traduce a una línea `style` en el código. El texto de la etiqueta se
-auto-contrasta contra ese relleno (oscuro o claro, el que dé mejor lectura),
-tanto en el lienzo como en el código exportado — así se ve bien en tema claro
-y en tema oscuro. Un nodo sin color no lleva `style` y el texto sigue el color
-del tema.
+**Color libre de nodo o de grupo:** selecciona un nodo o una caja y usa la
+barra flotante: 5 colores rápidos, o los selectores de **relleno** y **trazo**
+(cualquier color, no solo la paleta) más un campo de **hex** para pegar uno
+exacto (`#rrggbb` o `#rgb`). El texto de la etiqueta se auto-contrasta contra
+el relleno (oscuro o claro, el que dé mejor lectura), tanto en el lienzo como
+en el código exportado — así se ve bien en tema claro y en tema oscuro. Un
+nodo sin color no lleva `style` y el texto sigue el color del tema. En el
+código, los nodos se colorean con `style` y los grupos con `classDef`+`class`
+(es la única combinación que Mermaid respeta para el título de una caja; con
+`style` a secas el título saldría en negro sobre cualquier fondo oscuro).
 
 ---
 
@@ -130,11 +148,15 @@ El parser entiende el `flowchart` habitual, no solo lo que genera el editor:
 - Multidestino con `&`: `A --> B & C` (y `A & B --> C`) se expanden a varias
   flechas.
 - Cadenas `A --> B --> C`.
-- **Subgráficos** (`subgraph ... end`): se *aplanan* — se conservan sus nodos y
-  flechas, pero la caja del grupo no se dibuja en el lienzo (sí aparece en la
-  *Vista previa*, que usa el Mermaid real).
-- Líneas `style` (color de nodo) y entidades HTML en las etiquetas
-  (`&lt;`, `&gt;`, `<br/>`).
+- **Subgráficos** (`subgraph ... end`), incluso **anidados**: se dibujan como
+  cajas en el propio lienzo (no solo en la *Vista previa*). La caja no guarda
+  tamaño ni posición propios: se recalcula sola a partir de sus nodos, así que
+  siempre coincide con ellos, muevas lo que muevas.
+- Líneas `style`, y `classDef`+`class` (así es como se recupera el color de un
+  grupo al pegar de nuevo un `.mmd` que generó esta misma herramienta), y
+  entidades HTML en las etiquetas (`&lt;`, `&gt;`, `<br/>`).
+- Lo que queda fuera (y falla con un aviso, no en silencio): la forma abreviada
+  `A:::miClase`, `linkStyle`, `click` y los comentarios `%%`.
 
 Puedes pegar directamente el `flowchart` que te genere Claude u otra IA. Lo que
 quede fuera de este subconjunto (otros tipos de diagrama, sintaxis exótica) dará

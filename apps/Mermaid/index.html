@@ -152,6 +152,10 @@
   svg#canvas.panning { cursor: grabbing; }
   svg#canvas.linking { cursor: crosshair; }
 
+  .group-rect { fill: var(--panel-2); fill-opacity: .45; stroke: var(--node-stroke); stroke-width: 1.6; pointer-events: none; }
+  .group-head { fill: var(--panel-2); fill-opacity: .7; pointer-events: none; }
+  .group-label { fill: var(--text); font-size: 12.5px; font-weight: 700; dominant-baseline: middle; pointer-events: none; user-select: none; }
+  .group.sel .group-rect { stroke: var(--accent); stroke-width: 2.4; }
   .node-rect { fill: var(--node-fill); stroke: var(--node-stroke); stroke-width: 1.8; }
   .node-label { fill: var(--node-text); font-size: 14px; font-weight: 600; dominant-baseline: middle; text-anchor: middle; pointer-events: none; user-select: none; }
   .node.sel .node-rect { stroke: var(--accent); stroke-width: 2.6; filter: drop-shadow(0 0 6px var(--accent-soft)); }
@@ -174,6 +178,10 @@
   #floatbar .swatch { width: 20px; height: 20px; border-radius: 6px; border: 2px solid transparent; cursor: pointer; }
   #floatbar .swatch:hover { border-color: var(--text); }
   #floatbar .sep { width: 1px; height: 22px; background: var(--line); }
+  #floatbar .fb-color { width: 22px; height: 22px; padding: 0; border: 1px solid var(--line-2); border-radius: 6px; background: transparent; cursor: pointer; }
+  #floatbar .fb-hex { width: 74px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line-2);
+                       background: var(--panel-2); color: var(--text); font: 12px monospace; }
+  #floatbar .fb-hex:focus { outline: none; border-color: var(--accent); }
   #floatbar .mini { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 4px 7px; border-radius: 6px; font: inherit; font-weight: 600; }
   #floatbar .mini:hover { background: var(--panel-2); color: var(--text); }
   #floatbar .mini.danger:hover { color: var(--danger); }
@@ -262,6 +270,7 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h1"/></svg></button>
   <button class="btn ghost" id="theme" title="Tema claro / oscuro">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></button>
+  <button class="btn ghost" id="groupBtn" title="Agrupar la seleccion multiple (Shift+clic sobre varios nodos)" disabled>Agrupar</button>
   <button class="btn ghost" id="clear" title="Vaciar el lienzo">Vaciar</button>
 </header>
 
@@ -317,6 +326,7 @@
         </marker>
       </defs>
       <g id="world">
+        <g id="groups"></g>
         <g id="edges"></g>
         <g id="nodes"></g>
         <path id="tempEdge" class="temp-edge" style="display:none"></path>
@@ -331,6 +341,11 @@
       <div class="swatch" data-color="#ef4444" style="background:#ef4444" title="Rojo"></div>
       <div class="swatch" data-color="#a855f7" style="background:#a855f7" title="Violeta"></div>
       <div class="sep"></div>
+      <input type="color" id="fbFill" class="fb-color" title="Color de relleno" value="#3b82f6">
+      <input type="color" id="fbStroke" class="fb-color" title="Color de trazo" value="#1d4ed8">
+      <input type="text" id="fbHex" class="fb-hex" placeholder="#rrggbb" maxlength="7" title="Hex del relleno" spellcheck="false">
+      <div class="sep"></div>
+      <button class="mini" id="fbRemoveFromGroup" title="Quita el nodo del grupo, sin borrarlo">Sacar del grupo</button>
       <button class="mini" id="fbEdit">Editar</button>
       <button class="mini danger" id="fbDel">Borrar</button>
     </div>

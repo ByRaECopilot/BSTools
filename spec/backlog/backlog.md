@@ -21,6 +21,10 @@
 - Mermaid: cargar el `.mmd` del menú contextual directamente en el editor (hoy hay que pegar el
   contenido).
 - Mermaid: autoruteo ortogonal de las flechas.
+- Mermaid: grupos (`subgraph`) de primera clase en el lienzo y colores libres en hex — diseño cerrado en
+  `spec/decisions/ADR-0004-mermaid-grupos-y-estilos-libres.md` (`propuesto`: la verificación en navegador
+  ya está hecha —§2bis, medida el 2026-08-15—; solo falta el visto del dueño a §1). Hoy el editor aplana
+  los `subgraph` y pierde los `fill:` al pegar código.
 - Voice2Text: transcribe un audio/vídeo local o un enlace público a `.txt` y `.md`, en la propia máquina
   (diseño en `spec/decisions/ADR-0001-voice2text-stack.md` y `spec/decisions/ADR-0002-voice2text-modelo-y-gpu.md`).
   **v1.0 construida y verificada** (`apps/Voice2Text/VERIF-FINAL.md`): los seis recorridos de uso funcionan

@@ -171,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
         GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
         layout = {
             'tool': 'BSTools Mermaid',
-            'version': 1,
+            'version': 2,
             'name': name,
             'savedAt': time.strftime('%Y-%m-%dT%H:%M:%S'),
             'state': state,
