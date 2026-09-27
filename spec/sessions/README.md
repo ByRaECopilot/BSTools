@@ -7,6 +7,6 @@ El handoff VIVO — rotación de uno, `session-close` mueve el anterior a `_arch
 
 | | Documento | Título | Actualizado | KB |
 |---|---|---|---|---:|
-| 🟢 | [`2026-08-09-01-handoff.md`](2026-08-09-01-handoff.md) | MDViewer 1.1.0 entregado y canon actualizado | 2026-08-09 | 3 |
+| 🟢 | [`2026-08-10-01-handoff.md`](2026-08-10-01-handoff.md) | Voice2Text v1.1 construida, cookies sin verificar | 2026-08-10 | 3 |
 
 [← Índice general](../README.md)
